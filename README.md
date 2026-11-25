@@ -15,7 +15,7 @@ It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple val
 npm install pure-cbor
 ```
 
-Plain ESM with TypeScript declarations, needing only ES2023 and `TextEncoder`/`TextDecoder`. Tested on Node 22, 24 and 26 and on Deno; it should also run in Bun, browsers and workers, but those aren't tested yet.
+Plain ESM with TypeScript declarations, needing only ES2023 and `TextEncoder`/`TextDecoder`. Tested on Node 22, 24 and 26, Deno, Bun, workerd, and Chromium, Firefox and WebKit, both on the page and in web workers.
 
 ```ts
 import { encode, decode } from 'pure-cbor';
@@ -356,6 +356,15 @@ npm run bench:json             # vs the built-in JSON.stringify / JSON.parse
 npm run bench:cose             # WebAuthn, COSE, CWT and mdoc flows on spec vectors, vs CBOR libraries
 ```
 
+`npm test` includes a portable conformance suite, [test/portable/suite.mjs](test/portable/suite.mjs): RFC 8949 Appendix A, round trips of every value kind, errors, byte-string ownership, and sequences and Web Streams under every chunking. It uses no Node APIs, so CI runs the same file in every other runtime (Deno also runs the whole Node suite):
+
+```sh
+deno run test/portable/run.mjs
+bun test/portable/run.mjs
+npm install --no-save playwright && npx playwright install && node test/portable/browsers.mjs
+npm install --no-save miniflare && node test/portable/miniflare.mjs   # workerd
+```
+
 Optional comparisons and differential tests: random nested trees both ways with cbor-x, and the corpus both ways with cbor-x and cborg. Short-text decoding is checked against `TextDecoder` either way.
 
 ```sh
@@ -372,4 +381,4 @@ Releases are published from GitHub Actions with [npm trusted publishing](https:/
 
 1. Bump the version and add a CHANGELOG entry: `npm version patch` (or `minor`, `major`) commits and tags `vX.Y.Z`.
 2. `git push --follow-tags`.
-3. CI runs lint, the tests on Node 22, 24 and latest, the interoperability tests, and a packed-tarball check. The `publish` job then waits for approval of the `npm` environment, which accepts only `v*` tags.
+3. CI runs lint, the tests on Node 22, 24 and latest, the interoperability tests, a packed-tarball check, the whole suite on Deno, and the portable suite on Bun, workerd and three browsers. The `publish` job then waits for approval of the `npm` environment, which accepts only `v*` tags.

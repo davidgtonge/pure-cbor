@@ -277,7 +277,7 @@ pure-cbor writes preferred (smallest) map headers. cbor-x's standard encoder alw
 
 ## Correctness status
 
-85 tests pass with the comparison libraries installed:
+106 tests pass with the comparison libraries installed:
 
 - **Real-world vectors:**
   - all 63 COSE working-group examples decode and re-encode byte for byte, and 31 rebuilt `Sig_structure`/`MAC_structure`s match the signed bytes exactly;
@@ -303,4 +303,6 @@ pure-cbor writes preferred (smallest) map headers. cbor-x's standard encoder alw
   - depth bombs and nested allocation bombs;
   - prototype pollution in both directions.
 
-Browser and workerd runs remain outstanding.
+- **Runtimes:** CI runs the whole suite on Node 22, 24 and latest and on Deno, and the portable conformance suite (`test/portable/suite.mjs`) on Bun, workerd (through Miniflare), and Chromium, Firefox and WebKit, both on the page and in a module web worker.
+
+The benchmarks were taken on Node 22 only; performance in other runtimes is not yet measured.

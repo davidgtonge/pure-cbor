@@ -2361,12 +2361,13 @@ npm test</code></pre></figure></section>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/vectors.test.mjs">vectors.test.mjs</a></th><td>COSE, CWT, WebAuthn and mdoc vectors</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/corpus.test.mjs">corpus.test.mjs</a></th><td>The public and generated corpus, both ways with cbor-x and cborg</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/interoperability.test.mjs">interoperability.test.mjs</a></th><td>Bidirectional cbor-x interoperability (optional reference package)</td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/portable/suite.mjs">portable/suite.mjs</a></th><td>The portable conformance suite, with no Node APIs: Appendix A, every value kind, errors, ownership, sequences and Web Streams. Run in Node, Deno, Bun, workerd, and Chromium, Firefox and WebKit on the page and in web workers</td></tr>
       </tbody>
     </table>
   </div>
   <div class="callout honest">
-    <p class="callout-title">Not yet verified</p>
-    <p>Tests run on Node 22, 24 and 26 and on Deno. Browser and workerd runs remain outstanding, and benchmarks were taken on Node 22 only.</p>
+    <p class="callout-title">Every runtime, every push</p>
+    <p>CI runs the whole suite on Node 22, 24 and latest and on Deno, and the portable suite on Bun, workerd, and Chromium, Firefox and WebKit, both on the page and in a web worker. The benchmarks were taken on Node 22 only; performance elsewhere is not yet measured.</p>
   </div></section>
 </section>
 
@@ -2443,7 +2444,7 @@ export type MeasureValue = (value: Value, upper: boolean, depth: number, shortes
 const bytes = encode({ id: 7, name: 'Ada', tags: ['x', 'y'], active: true, manager: null });
 console.log(decode(bytes)); // { id: 7, name: 'Ada', tags: ['x', 'y'], active: true, manager: null }
 console.log(decode(encode(new Float64Array([1.25, -0, Math.PI])))); // Float64Array</code></pre></figure>
-  <p><code>encode</code> returns an exactly sized <code>Uint8Array</code> that you own. <code>decode</code> reads exactly one item and rejects trailing bytes. It needs only ES2023 and <code>TextEncoder</code>/<code>TextDecoder</code>, and is tested on Node 22, 24 and 26 and on Deno. It should also run in Bun, browsers and workers, but those aren't tested yet.</p>
+  <p><code>encode</code> returns an exactly sized <code>Uint8Array</code> that you own. <code>decode</code> reads exactly one item and rejects trailing bytes. It needs only ES2023 and <code>TextEncoder</code>/<code>TextDecoder</code>, and is tested on Node 22, 24 and 26, Deno, Bun, workerd, and Chromium, Firefox and WebKit, both on the page and in web workers.</p>
   <p class="closing-links"><a class="button primary" href="https://www.npmjs.com/package/pure-cbor">pure-cbor on npm</a> <a class="button" href="https://github.com/davidgtonge/pure-cbor">Source on GitHub</a> <a class="button" href="https://github.com/davidgtonge/pure-cbor/blob/main/BENCHMARK.md">BENCHMARK.md</a></p>
 </section>
 

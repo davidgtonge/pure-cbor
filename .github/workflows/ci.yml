@@ -106,6 +106,74 @@ jobs:
           npx tsc -p .
           node out/main.js
 
+  # The other runtimes the README names. Each builds dist/ with Node, then runs it elsewhere.
+  # test/portable/suite.mjs is one conformance suite with no Node APIs (RFC 8949 Appendix A,
+  # round trips of every value kind, errors, ownership, sequences and Web Streams); `npm test`
+  # runs it in Node too.
+  deno:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+      - run: npm ci
+      - run: npm run build
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with: { deno-version: v2.x }
+      # Deno runs the whole Node suite (node:test, node:assert, node:vm) as well as the portable one.
+      - run: deno test --allow-read --allow-env --no-check test/
+      - run: deno run test/portable/run.mjs
+
+  bun:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+      - run: npm ci
+      - run: npm run build
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with: { bun-version: latest }
+      - run: bun test/portable/run.mjs
+
+  # Chromium, Firefox and WebKit, each on the page and in a module web worker.
+  browsers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+      - run: npm ci
+      - run: npm run build
+      # Test-only tool, never part of the package; pinned here so updates are deliberate.
+      - run: npm install --no-save --package-lock=false playwright@1.65.1
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: node test/portable/browsers.mjs
+
+  # workerd, Cloudflare's Workers runtime, through Miniflare.
+  workerd:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm install --no-save --package-lock=false miniflare@4.20260730.0
+      - run: node test/portable/miniflare.mjs
+
   # Runs only for a pushed tag like v1.0.1, after everything above passes, and only once someone
   # approves the `npm` environment (Settings > Environments). Authenticates with npm trusted
   # publishing: GitHub issues a short-lived OIDC token that npm accepts for packages that name this
@@ -113,7 +181,7 @@ jobs:
   # provenance, linking the published version to this run and commit.
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, test, interop, package]
+    needs: [lint, test, interop, package, deno, bun, browsers, workerd]
     runs-on: ubuntu-24.04
     environment:
       name: npm

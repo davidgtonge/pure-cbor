@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Tested in every runtime the README names: CI now runs the whole suite on Deno, and a portable conformance suite with no Node APIs on Bun, workerd (through Miniflare), and Chromium, Firefox and WebKit, on the page and in web workers.
+
 ## 1.0.1
 
 No code changes. The first release built and published by GitHub Actions through npm trusted publishing, so it carries provenance: a signed link from the package on npm to the commit and workflow run that built it.
