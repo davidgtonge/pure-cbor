@@ -184,7 +184,7 @@ function decodeShortUtf8(bytes: Uint8Array, start: number, end: number): string 
 
 /** Kept small so V8 can inline it into hot array and map loops; the native
  * decoder and its error handling live in decodeNative. */
-export function readPayload(bytes: Uint8Array, start: number, byteLength: number, options?: DecodeOptions): string {
+export function readPayload(bytes: Uint8Array, start: number, byteLength: number, options: DecodeOptions | undefined): string {
   readable(bytes, start, byteLength);
   const end = start + byteLength;
   if (byteLength <= SHORT_DECODE) {
@@ -194,7 +194,7 @@ export function readPayload(bytes: Uint8Array, start: number, byteLength: number
   return decodeNative(bytes, start, end, options);
 }
 
-function decodeNative(bytes: Uint8Array, start: number, end: number, options?: DecodeOptions): string {
+function decodeNative(bytes: Uint8Array, start: number, end: number, options: DecodeOptions | undefined): string {
   try {
     const decoder = options?.invalidUtf8 === 'replace' ? lenientDecoder : strictDecoder;
     return decoder.decode(bytes.subarray(start, end));

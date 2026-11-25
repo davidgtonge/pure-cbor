@@ -90,7 +90,7 @@ export function writeByteString(bytes: Uint8Array, offset: number, value: Uint8A
   return payloadStart + byteLength;
 }
 
-function materialize(bytes: Uint8Array, start: number, byteLength: number, descriptor: TagDescriptor, options?: DecodeOptions): TypedArray {
+function materialize(bytes: Uint8Array, start: number, byteLength: number, descriptor: TagDescriptor, options: DecodeOptions | undefined): TypedArray {
   const { ArrayType, littleEndian } = descriptor;
   const width = ArrayType.BYTES_PER_ELEMENT;
   if (byteLength % width !== 0) fail('invalid-length', start, 'Typed array payload is not a multiple of its element width');
@@ -119,7 +119,7 @@ function materialize(bytes: Uint8Array, start: number, byteLength: number, descr
 }
 
 /** offset is just after the byte string's initial byte. */
-export function readBytes(bytes: Uint8Array, offset: number, additionalInfo: number, options?: DecodeOptions): Decoded<TypedArray> {
+export function readBytes(bytes: Uint8Array, offset: number, additionalInfo: number, options: DecodeOptions | undefined): Decoded<TypedArray> {
   const byteLength = readArgumentValue(bytes, offset, additionalInfo);
   const payloadStart = argumentEnd(offset, additionalInfo);
   return [materialize(bytes, payloadStart, byteLength, tags[BYTES_TAG]!, options), payloadStart + byteLength];
@@ -132,7 +132,7 @@ export function isTypedArrayTag(tag: number): boolean {
 
 /** contentOffset is just after the tag header; the content must be a
  * definite-length byte string. tag must satisfy isTypedArrayTag. */
-export function readTaggedContent(bytes: Uint8Array, contentOffset: number, tag: number, options?: DecodeOptions): Decoded<TypedArray> {
+export function readTaggedContent(bytes: Uint8Array, contentOffset: number, tag: number, options: DecodeOptions | undefined): Decoded<TypedArray> {
   readable(bytes, contentOffset, 1);
   const token = bytes[contentOffset];
   const additionalInfo = token & 31;
