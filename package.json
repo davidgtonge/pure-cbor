@@ -1,6 +1,6 @@
 {
   "name": "pure-cbor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fast, functional CBOR for JavaScript and TypeScript: the full RFC 8949 data model, streaming, COSE-ready, zero dependencies",
   "author": "Dave Tonge",
   "license": "MIT",
