@@ -337,14 +337,29 @@ function checkObjectKeys(state: DecodeState, objectKeys: readonly Value[], heade
   if (hasEqualBytes(byteStrings) || fingerprints.size !== otherKeys) fail('duplicate-key', headerOffset, 'Duplicate map key');
 }
 
+/** With duplicateKeys: 'last-wins', an object key equal to an earlier one
+ * becomes that earlier key, so its value replaces the earlier value in
+ * place, as a repeated primitive key's does. */
+function earlierEqualKey(keysByFingerprint: Map<string, Value>, key: Value): Value {
+  const fingerprint = keyFingerprint(key);
+  const earlier = keysByFingerprint.get(fingerprint);
+  if (earlier !== undefined) return earlier;
+  keysByFingerprint.set(fingerprint, key);
+  return key;
+}
+
 function readIntoMap(state: DecodeState, map: Map<Value, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue): Map<Value, Value> {
   const bytes = state.bytes;
   let objectKeys: Value[] | undefined;
+  let keysByFingerprint: Map<string, Value> | undefined;
   for (; moreEntries(state, index, entryCount, headerOffset); index++) {
     readable(bytes, state.position, 1);
     const keyToken = bytes[state.position];
-    const key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readValue(state);
-    if (typeof key === 'object' && key !== null) (objectKeys ??= []).push(key);
+    let key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readValue(state);
+    if (typeof key === 'object' && key !== null) {
+      if (state.rejectDuplicateKeys) (objectKeys ??= []).push(key);
+      else key = earlierEqualKey(keysByFingerprint ??= new Map(), key);
+    }
     map.set(key, readEntryValue(state, readValue));
   }
   checkDuplicates(state, map.size, index, headerOffset);

@@ -289,13 +289,14 @@ interface SimpleValue { readonly simple: number }                  // simple(n)
 
 Notes:
 
+- **Dates.** Tag 1 (epoch seconds) is exact. Tag 0 text is read with `Date.parse`, which is lenient: text without a time zone is read as local time, and an impossible day such as February 31 rolls over. For strict RFC 3339 checking, pass your own decoder: `tags: { 0: yourParser }`.
 - **Integers and floats.** Safe integers always encode as CBOR integers in their preferred width, so millisecond timestamps reach other languages as integers. `5n` encodes like `5`, because CBOR has one integer type, so it decodes as the number `5`. cbor-x decodes 64-bit integers as `BigInt` unless created with `int64AsNumber: true`.
 - **Objects:**
   - Encoding takes own enumerable string keys in `Object.keys` order, with the preferred header. Properties set to `undefined` are omitted, as in JSON. Symbol keys are ignored. `Set`, class instances and boxed primitives are rejected rather than silently flattened.
   - A `__proto__` key decodes as an own data property: no prototype pollution, no renaming.
-- **Maps.** In the default `'auto'` mode, a map whose keys are all text decodes as a plain object, so a `Map` with only string keys comes back as an object. Use `maps: 'map'` to always get `Map`. Byte-string and other object keys are distinct by identity in a JS `Map`.
-- **Duplicate keys** are rejected by default (`duplicateKeys: 'last-wins'` to keep the last). `Map` keys that are byte strings, arrays, maps or tags are compared as CBOR values, so equal ones are duplicates however they are encoded; with `'last-wins'` they stay separate entries, since a `Map` tells them apart.
-- **Indefinite-length items** (`5f`, `7f`, `9f`, `bf` … `ff`) are accepted on decode, including in streams. pure-cbor always encodes definite lengths. Text chunks must each be valid UTF-8 (RFC 8949 §3.2.3).
+- **Maps.** In the default `'auto'` mode, a map whose keys are all text decodes as a plain object, so a `Map` with only string keys comes back as an object. Use `maps: 'map'` to always get `Map`.
+- **Duplicate keys** are rejected by default (`duplicateKeys: 'last-wins'` to keep the last). `Map` keys that are byte strings, arrays, maps or tags are compared as CBOR values, so equal ones are duplicates however they are encoded. With `'last-wins'` they merge as primitive keys do: the first key keeps its place and takes the last value.
+- **Indefinite-length items** (`5f`, `7f`, `9f`, `bf` … `ff`) are accepted on decode, including in streams. pure-cbor always encodes definite lengths. Text chunks must each be valid UTF-8 (RFC 8949 §3.2.3). Chunks are joined into one buffer with no allocation per chunk, so a string split into one-byte chunks costs no more memory than its size.
 
 ### Encode options
 

@@ -123,7 +123,9 @@ test("maps: any keys; 'auto', 'object' and 'map' modes; duplicates", () => {
   }
   assert.equal(decode(hex('a2 4101 01 4102 02'.replaceAll(' ', ''))).size, 2, 'distinct byte strings');
   assert.equal(decode(hex('a2 8101 01 81 4101 02'.replaceAll(' ', ''))).size, 2, '[1] and [h01] differ');
-  assert.equal(decode(hex('a2 4101 01 4101 02'.replaceAll(' ', '')), { duplicateKeys: 'last-wins' }).size, 2, 'last-wins does not merge object keys');
+  // last-wins merges equal object keys as it does primitive ones: first key, last value.
+  const merged = decode(hex('a3 4101 01 8102 02 580101 03'.replaceAll(' ', '')), { duplicateKeys: 'last-wins' });
+  assert.deepEqual([...merged], [[bytesOf(1), 3], [[2], 2]]);
   // Large maps sort instead of comparing pairwise, so the check stays fast.
   const manyKeys = new Map(Array.from({ length: 20000 }, (_, index) => [Uint8Array.of(index >> 8, index & 255, 7), index]));
   const started = performance.now();

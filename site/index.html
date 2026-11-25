@@ -539,7 +539,7 @@ function moreEntries(state: DecodeState, index: number, entryCount: number, head
   if (index &gt;= state.maxMapEntries) fail('map-limit', headerOffset, 'Map exceeds maxMapEntries');
   return true;
 }</code></pre></figure>
-<figure class="code" data-source="src/map.ts" data-lines="361-365"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** state.position is immediately after the map's initial byte. Text keys build
+<figure class="code" data-source="src/map.ts" data-lines="376-380"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** state.position is immediately after the map's initial byte. Text keys build
  * a plain object; Map is used in 'map' mode, or in 'auto' mode from the first
  * non-text key. The object loop stays in this function: one call deeper, it
  * was not reliably inlined and small-object decoding became bimodal. */
@@ -1233,7 +1233,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
 }</code></pre></figure></section>
       <section class="step" data-nodes="map" data-bytes="0 4" data-out="object id-value" data-note="Both keys are text, so the entries go into a plain object. The value 07 is below 24 and is decoded inline in the loop.">  <h3 id="decode-maps">6. The map loop</h3>
   <p>In the default <code>'auto'</code> mode, a map whose keys are all text becomes a plain object. The object loop lives inside <code>MapCodec.read</code> itself rather than a helper, and small unsigned integer values are decoded inline. A <code>__proto__</code> key becomes an own data property through <code>Object.defineProperty</code>: no prototype pollution, and no renaming.</p>
-<figure class="code" data-source="src/map.ts" data-lines="365-379,385-422"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue): Value {
+<figure class="code" data-source="src/map.ts" data-lines="380-394,400-437"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue): Value {
   const bytes = state.bytes;
   const headerOffset = state.position - 1;
   const indefinite = additionalInfo === Info.Indefinite;
@@ -1288,7 +1288,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
   return object;
 }</code></pre></figure>
   <p>If a non-text key appears, the entries read so far move into a <code>Map</code> and decoding carries on there, keeping their order. Duplicate keys are found by counting once per map rather than checking each key. A <code>Map</code> tells keys such as byte strings and arrays apart by identity, so those are compared as CBOR values: byte strings by their bytes, the rest by a fingerprint built from the decoded value, so decoding never needs the encoder.</p>
-<figure class="code" data-source="src/map.ts" data-lines="263-268,318-359"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** A duplicate key overwrites an earlier one, leaving fewer distinct keys
+<figure class="code" data-source="src/map.ts" data-lines="263-268,318-339,350-374"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** A duplicate key overwrites an earlier one, leaving fewer distinct keys
  * than entries. Counting once is ~4x cheaper than checking each key. */
 function checkDuplicates(state: DecodeState, distinctKeys: number, entries: number, headerOffset: number): void {
   if (state.rejectDuplicateKeys &amp;&amp; distinctKeys !== entries) fail('duplicate-key', headerOffset, 'Duplicate map key');
@@ -1317,14 +1317,20 @@ function checkObjectKeys(state: DecodeState, objectKeys: readonly Value[], heade
   if (hasEqualBytes(byteStrings) || fingerprints.size !== otherKeys) fail('duplicate-key', headerOffset, 'Duplicate map key');
 }
 
+// …
+
 function readIntoMap(state: DecodeState, map: Map&lt;Value, Value&gt;, index: number, entryCount: number, headerOffset: number, readValue: ReadValue): Map&lt;Value, Value&gt; {
   const bytes = state.bytes;
   let objectKeys: Value[] | undefined;
+  let keysByFingerprint: Map&lt;string, Value&gt; | undefined;
   for (; moreEntries(state, index, entryCount, headerOffset); index++) {
     readable(bytes, state.position, 1);
     const keyToken = bytes[state.position];
-    const key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readValue(state);
-    if (typeof key === 'object' &amp;&amp; key !== null) (objectKeys ??= []).push(key);
+    let key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readValue(state);
+    if (typeof key === 'object' &amp;&amp; key !== null) {
+      if (state.rejectDuplicateKeys) (objectKeys ??= []).push(key);
+      else key = earlierEqualKey(keysByFingerprint ??= new Map(), key);
+    }
     map.set(key, readEntryValue(state, readValue));
   }
   checkDuplicates(state, map.size, index, headerOffset);
@@ -2382,6 +2388,7 @@ npm test</code></pre></figure></section>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/vectors.test.mjs">vectors.test.mjs</a></th><td>COSE, CWT, WebAuthn and mdoc vectors</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/corpus.test.mjs">corpus.test.mjs</a></th><td>The public and generated corpus, both ways with cbor-x and cborg</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/interoperability.test.mjs">interoperability.test.mjs</a></th><td>Bidirectional cbor-x interoperability (optional reference package)</td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/security.test.mjs">security.test.mjs</a></th><td>Equal object keys under <code>last-wins</code>; strings split into thousands of chunks; chunked text and split characters</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/portable/suite.mjs">portable/suite.mjs</a></th><td>The portable conformance suite, with no Node APIs: Appendix A, every value kind, errors, ownership, sequences and Web Streams. Run in Node, Deno, Bun, workerd, and Chromium, Firefox and WebKit on the page and in web workers</td></tr>
       </tbody>
     </table>
