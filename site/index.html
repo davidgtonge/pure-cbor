@@ -380,7 +380,7 @@ export function writeShortest(bytes: Uint8Array, offset: number, value: number):
   return writeShortestFloat(bytes, offset, value);
 }</code></pre></figure>
   <p>And the public <code>encode</code> sends any options down a separate path on its first line, so the default path below it is unchanged by them:</p>
-<figure class="code" data-source="src/allocation.ts" data-lines="42-46,69-70"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Exact-sized, independently owned output. Small outputs never touch a
+<figure class="code" data-source="src/allocation.ts" data-lines="45-49,72-73"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Exact-sized, independently owned output. Small outputs never touch a
  * `.buffer`, so they stay cheap V8 on-heap allocations. */
 export function encode(value: Value, options?: EncodeOptions): Uint8Array {
   // Options take a separate path; the default below is unchanged by them.
@@ -401,7 +401,7 @@ export function encode(value: Value, options?: EncodeOptions): Uint8Array {
     </table>
   </div>
   <p>The slab encoder is a closure, not a serializer class. Its state is three local variables, and separate instances share nothing:</p>
-<figure class="code" data-source="src/allocation.ts" data-lines="91-116"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** An explicit allocation policy. The closure owns at most one current slab.
+<figure class="code" data-source="src/allocation.ts" data-lines="94-119"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** An explicit allocation policy. The closure owns at most one current slab.
  * Previously returned views stay valid and never overlap subsequent writes.
  * Large items bypass the pool. Callers must not transfer/detach or modify the
  * entire backing buffer; mutating their own returned slice is allowed. */
@@ -560,7 +560,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
     <div class="steps">
       <section class="step" data-nodes="encode" data-bytes="" data-note="An object has no size known up front, so it skips the direct paths and is staged.">  <h3 id="encode-front-door">1. <code>encode()</code>: the front door</h3>
   <p>The public <code>encode</code> lives in <code>allocation.ts</code>, because it is an allocation policy. Options leave on the first line. Numbers, booleans, <code>null</code>, <code>undefined</code> and typed arrays have sizes known up front, so they are written straight into an exactly sized array with no writer at all. Strings go directly into staging memory. Everything else is staged.</p>
-<figure class="code" data-source="src/allocation.ts" data-lines="42-70"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Exact-sized, independently owned output. Small outputs never touch a
+<figure class="code" data-source="src/allocation.ts" data-lines="45-73"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Exact-sized, independently owned output. Small outputs never touch a
  * `.buffer`, so they stay cheap V8 on-heap allocations. */
 export function encode(value: Value, options?: EncodeOptions): Uint8Array {
   // Options take a separate path; the default below is unchanged by them.
@@ -590,14 +590,17 @@ export function encode(value: Value, options?: EncodeOptions): Uint8Array {
   return staged(value, DEFAULT_PROFILE, copyOut);
 }</code></pre></figure></section>
       <section class="step" data-nodes="staged copyOut" data-bytes="0-13" data-note="All 14 bytes are written into the reused staging buffer, then copied out once into the result.">  <h3 id="encode-staging">2. <code>staged()</code>: one growable pass</h3>
-  <p>The staging buffer is the only module-level memory the encoder uses, and it holds no data between calls: <code>take</code> must copy what it needs before <code>staged</code> returns. If an exotic input such as an accessor property calls <code>encode</code> again in the middle, the inner call gets a private buffer instead. A buffer that grew past 64 KiB is not kept.</p>
-<figure class="code" data-source="src/allocation.ts" data-lines="11-40"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Staging memory for owned text and container output: one growable pass,
+  <p>The staging buffer is the only module-level memory the encoder uses, and it holds no data between calls: <code>take</code> must copy what it needs before <code>staged</code> returns. If an exotic input such as an accessor property calls <code>encode</code> again in the middle, the inner call gets a private buffer instead. A buffer that grew is kept up to 256 KiB, so outputs up to that size don't regrow it on every call.</p>
+<figure class="code" data-source="src/allocation.ts" data-lines="11-43"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Staging memory for owned text and container output: one growable pass,
  * then the used bytes are copied out once. One output allocation and no
  * sizing pass. (In V8 any typed array over 64 bytes is a separate off-heap
  * allocation costing ~0.5 µs, so allocation count dominates.) It holds no data
  * between calls; a reentrant call, possible only through exotic inputs such
- * as accessor properties, uses a private buffer instead. */
-const STAGING_LIMIT = 64 * 1024;
+ * as accessor properties, uses a private buffer instead. A buffer that grew
+ * is kept up to 256 KiB: at 64 KiB, every larger output regrew it and copied
+ * the first 64 KB again, which made a 130 KB float mesh 6% and a 90 KB float
+ * array 18% slower to encode. */
+const STAGING_LIMIT = 256 * 1024;
 let staging: Uint8Array = new Uint8Array(0);
 let stagingInUse = false;
 

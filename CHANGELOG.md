@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Faster encoding of outputs over 64 KiB: the staging buffer is now kept up to 256 KiB between calls. At 64 KiB, every larger output regrew it and copied its first 64 KB again. Measured under the same conditions, a 130 KB float mesh encodes about 4% faster and a 90 KB float array about 19% faster. A process keeps at most 256 KiB for this after a large encode.
+
 ## 1.0.2
 
 Fixes:

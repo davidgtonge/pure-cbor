@@ -13,8 +13,11 @@ import type { EncodeOptions, TypedArray, Value } from './types.js';
  * sizing pass. (In V8 any typed array over 64 bytes is a separate off-heap
  * allocation costing ~0.5 µs, so allocation count dominates.) It holds no data
  * between calls; a reentrant call, possible only through exotic inputs such
- * as accessor properties, uses a private buffer instead. */
-const STAGING_LIMIT = 64 * 1024;
+ * as accessor properties, uses a private buffer instead. A buffer that grew
+ * is kept up to 256 KiB: at 64 KiB, every larger output regrew it and copied
+ * the first 64 KB again, which made a 130 KB float mesh 6% and a 90 KB float
+ * array 18% slower to encode. */
+const STAGING_LIMIT = 256 * 1024;
 let staging: Uint8Array = new Uint8Array(0);
 let stagingInUse = false;
 
