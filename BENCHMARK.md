@@ -277,7 +277,7 @@ pure-cbor writes preferred (smallest) map headers. cbor-x's standard encoder alw
 
 ## Correctness status
 
-109 tests pass with the comparison libraries installed:
+114 tests pass with the comparison libraries installed:
 
 - **Real-world vectors:**
   - all 63 COSE working-group examples decode and re-encode byte for byte, and 31 rebuilt `Sig_structure`/`MAC_structure`s match the signed bytes exactly;
