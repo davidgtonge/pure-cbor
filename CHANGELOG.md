@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+No code changes. The first release built and published by GitHub Actions through npm trusted publishing, so it carries provenance: a signed link from the package on npm to the commit and workflow run that built it.
+
 ## 1.0.0
 
 First public release, renamed from cbor-fp to pure-cbor. The API is now covered by semver.
