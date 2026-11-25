@@ -1,12 +1,21 @@
 # Changelog
 
-## Unreleased
+## 1.0.2
 
-- Fix: an indefinite-length byte or text string split into many small chunks allocated a view or string per chunk, so an 8 MB message of one-byte chunks could exhaust a 256 MB heap. Chunks are now joined into one buffer with no per-chunk allocation; that message decodes in 30 ms. Text chunks are still each required to be valid UTF-8, and `invalidUtf8: 'replace'` output is unchanged.
-- `duplicateKeys: 'last-wins'` now merges equal `Map` keys that are byte strings, arrays, maps or tags, as it does primitive keys: the first key keeps its place and takes the last value.
-- Docs: tag 0 date/time text is read with `Date.parse`, which is lenient; pass a decoder in `tags` for strict RFC 3339.
-- Fix: duplicate `Map` keys that are byte strings, arrays, maps or tags were not detected when decoding, because a `Map` tells such keys apart by identity. They are now compared as CBOR values (byte strings by their bytes, others by a fingerprint of the decoded value), so `{h'01': 1, h'01': 2}` is a `duplicate-key` error however the keys are encoded. Maps without such keys are unaffected. Maps with byte-string keys decode about 20% slower, and the rare maps with array or map keys about 4× slower. A decode-only bundle grows by 0.6 KB gzipped.
-- Tested in every runtime the README names: CI now runs the whole suite on Deno, and a portable conformance suite with no Node APIs on Bun, workerd (through Miniflare), and Chromium, Firefox and WebKit, on the page and in web workers.
+Fixes:
+
+- **Duplicate `Map` keys** that are byte strings, arrays, maps or tags were not detected when decoding, because a `Map` tells such keys apart by identity. They are now compared as CBOR values (byte strings by their bytes, others by a fingerprint of the decoded value), so `{h'01': 1, h'01': 2}` is a `duplicate-key` error however the keys are encoded. Maps without such keys are unaffected; maps with byte-string keys decode about 20% slower, and the rare maps with array or map keys about 4× slower.
+- **`duplicateKeys: 'last-wins'`** now merges those equal keys as it does primitive ones: the first key keeps its place and takes the last value.
+- **Chunked strings:** an indefinite-length byte or text string split into many small chunks allocated a view or string per chunk, so an 8 MB message of one-byte chunks could exhaust a 256 MB heap. Chunks are now joined into one buffer with no per-chunk allocation; that message decodes in 30 ms. Text chunks must still each be valid UTF-8, and `invalidUtf8: 'replace'` output is unchanged.
+
+Size: an import of `decode` alone is 6.1 KB minified and gzipped, from 5.2 KB.
+
+Testing and docs:
+
+- Tested in every runtime the README names: CI runs the whole suite on Deno, and a portable conformance suite with no Node APIs on Bun, workerd (through Miniflare), and Chromium, Firefox and WebKit, on the page and in web workers. Publishing waits for all of them.
+- New tests: rejection vectors from other decoders (RFC 8949 Appendix F, ciborium, cbor2, Jackson) and security cases for the fixes above.
+- Tag 0 date/time text is read with `Date.parse`, which is lenient; the README says so and shows how to pass a strict decoder in `tags`.
+- The README explains why to choose pure-cbor, with benchmark tables (public data, small messages, WebAuthn) and a size and dependency comparison with six other CBOR libraries.
 
 ## 1.0.1
 

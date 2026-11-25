@@ -22,6 +22,35 @@ It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple val
   - Releases are built in GitHub Actions and published with npm provenance.
   - CI actions are pinned to commit SHAs.
 
+### Speed
+
+On public data (the [benchmark corpus](bench/corpus/README.md)), time per operation; lower is better. "vs fastest other" is the faster of cbor-x and cborg divided by pure-cbor.
+
+| Workload | Decode: pure-cbor | cbor-x | cborg | vs fastest other | Encode: pure-cbor | cbor-x | cborg | vs fastest other |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| cbor-x's benchmark document | 19.4 µs | 22.4 µs | 40.4 µs | **1.16×** | 16.7 µs | 17.3 µs | 50.0 µs | **1.04×** |
+| msgpack sample-large | 12.0 µs | 20.5 µs | 27.8 µs | **1.71×** | 12.0 µs | 14.8 µs | 21.2 µs | **1.24×** |
+| 100 Bluesky-style records | 46.6 µs | 71.2 µs | 86.2 µs | **1.53×** | 47.3 µs | 56.5 µs | 66.7 µs | **1.20×** |
+| Float mesh, 1,000 triangles | 183.7 µs | 301.3 µs | 845.3 µs | **1.64×** | 214.8 µs | 228.7 µs | 2,306.8 µs | **1.06×** |
+| 10,000 floats | 34.0 µs | 51.7 µs | 454.3 µs | **1.52×** | 74.3 µs | 111.5 µs | 1,566.1 µs | **1.50×** |
+
+Small messages, decoded from a new buffer each time, as a just-received message is:
+
+| Message | pure-cbor | cbor-x | cborg | vs fastest other |
+|---|---:|---:|---:|---:|
+| A small integer | 34 ns | 455 ns | 426 ns | **12.6×** |
+| 32 ASCII characters | 81 ns | 447 ns | 418 ns | **5.2×** |
+| One object row (6 fields) | 236 ns | 567 ns | 820 ns | **2.4×** |
+
+**WebAuthn and COSE:** these messages are mostly byte strings. pure-cbor copies them by default, so they stay valid after the input changes, while cbor-x returns views into the input. Parsing 15 WebAuthn attestations takes 18–21 µs by default, and 8–11 µs with `binaryOwnership: 'borrow'`, which is level with cbor-x's 7.9 µs.
+
+**How this was measured:**
+
+- Node 22.19 on macOS arm64, on pure-cbor 0.5.0. The WebAuthn figures are from 0.6.0, which changed how byte strings are copied.
+- cbor-x runs as pure JavaScript, without its optional native addon. cborg uses its defaults, which sort map keys and shrink floats: extra work pure-cbor doesn't do.
+- Each workload runs in its own process; the result is the median of 5 rounds. Treat anything within about ±10% of 1.0× as level.
+- Where pure-cbor is level or behind (arrays of short strings, long text from a reused buffer, some small mixed arrays and objects), the reasons and every other workload are in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
+
 ### Compared with other CBOR libraries
 
 | Library | Version | Runtime dependencies | Lines of code | Minified + gzip |
