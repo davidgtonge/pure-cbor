@@ -3,7 +3,7 @@
 CBOR for JavaScript and TypeScript, with two promises:
 
 1. **Clean, functional code.** Pure functions over explicit state, in the spirit of OCaml: no classes (apart from the error type), no state kept between calls apart from two documented caches (decoded map keys, and one write function per encode-option set), immutable tagged variants, and one named set of wire constants. About 2,800 lines of strict TypeScript, with no runtime dependencies, no Node APIs and no generated code (CSP-safe).
-2. **The fastest standard CBOR library for JavaScript.** Pure JS, no native addon. On public benchmark data it decodes 1.16–1.71× faster than cbor-x, the next fastest of the six other CBOR libraries measured, and encodes level with it to 1.50× faster (cbor-x also measured as pure JS, without its optional native addon). Small messages decoded from a fresh buffer are 5–12× faster. It isn't ahead everywhere: some small mixed arrays and objects are level, and on COSE and WebAuthn messages it matches cbor-x only with `binaryOwnership: 'borrow'`, since cbor-x returns views into the input by default while pure-cbor copies. Details in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
+2. **The fastest standard CBOR library for JavaScript.** Pure JS, no native addon. On public benchmark data it decodes 1.21–1.72× faster than cbor-x, the next fastest of the six other CBOR libraries measured, and encodes from level with it (0.93× on a float-heavy mesh) to 1.55× faster (cbor-x also measured as pure JS, without its optional native addon). Small messages decoded from a fresh buffer are 5–13× faster. It isn't ahead everywhere: arrays of short strings and some mixed arrays are level, cbor-x encodes a COSE key 1.4× faster, and on WebAuthn and CWT messages pure-cbor matches cbor-x only with `binaryOwnership: 'borrow'`, since cbor-x returns views into the input by default while pure-cbor copies. Details in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
 
 It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple values, typed arrays), deterministic encoding, CBOR sequences over Web Streams, and COSE, CWT, WebAuthn and mdoc messages, checked against their published test vectors. Standard CBOR only: no private wire format.
 
@@ -28,25 +28,25 @@ On public data (the [benchmark corpus](bench/corpus/README.md)), time per operat
 
 | Workload | Decode: pure-cbor | cbor-x | cborg | vs fastest other | Encode: pure-cbor | cbor-x | cborg | vs fastest other |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| cbor-x's benchmark document | 19.4 µs | 22.4 µs | 40.4 µs | **1.16×** | 16.7 µs | 17.3 µs | 50.0 µs | **1.04×** |
-| msgpack sample-large | 12.0 µs | 20.5 µs | 27.8 µs | **1.71×** | 12.0 µs | 14.8 µs | 21.2 µs | **1.24×** |
-| 100 Bluesky-style records | 46.6 µs | 71.2 µs | 86.2 µs | **1.53×** | 47.3 µs | 56.5 µs | 66.7 µs | **1.20×** |
-| Float mesh, 1,000 triangles | 183.7 µs | 301.3 µs | 845.3 µs | **1.64×** | 214.8 µs | 228.7 µs | 2,306.8 µs | **1.06×** |
-| 10,000 floats | 34.0 µs | 51.7 µs | 454.3 µs | **1.52×** | 74.3 µs | 111.5 µs | 1,566.1 µs | **1.50×** |
+| cbor-x's benchmark document | 18.5 µs | 22.3 µs | 39.7 µs | **1.21×** | 14.7 µs | 16.9 µs | 50.4 µs | **1.15×** |
+| msgpack sample-large | 12.0 µs | 20.6 µs | 27.5 µs | **1.72×** | 11.9 µs | 14.6 µs | 21.3 µs | **1.24×** |
+| 100 Bluesky-style records | 46.2 µs | 71.2 µs | 86.8 µs | **1.55×** | 46.0 µs | 55.2 µs | 66.8 µs | **1.19×** |
+| Float mesh, 1,000 triangles | 184.2 µs | 300.8 µs | 844.0 µs | **1.63×** | 240.8 µs | 223.5 µs | 2,309.4 µs | 0.93× |
+| 10,000 floats | 33.6 µs | 53.8 µs | 443.3 µs | **1.60×** | 69.7 µs | 108.0 µs | 1,515.7 µs | **1.55×** |
 
 Small messages, decoded from a new buffer each time, as a just-received message is:
 
 | Message | pure-cbor | cbor-x | cborg | vs fastest other |
 |---|---:|---:|---:|---:|
-| A small integer | 34 ns | 455 ns | 426 ns | **12.6×** |
-| 32 ASCII characters | 81 ns | 447 ns | 418 ns | **5.2×** |
-| One object row (6 fields) | 236 ns | 567 ns | 820 ns | **2.4×** |
+| A small integer | 32 ns | 387 ns | 455 ns | **11.9×** |
+| 32 ASCII characters | 81 ns | 457 ns | 424 ns | **5.2×** |
+| One object row (6 fields) | 232 ns | 569 ns | 806 ns | **2.5×** |
 
-**WebAuthn and COSE:** these messages are mostly byte strings. pure-cbor copies them by default, so they stay valid after the input changes, while cbor-x returns views into the input. Parsing 15 WebAuthn attestations takes 18–21 µs by default, and 8–11 µs with `binaryOwnership: 'borrow'`, which is level with cbor-x's 7.9 µs.
+**WebAuthn and COSE:** these messages are mostly byte strings. pure-cbor copies them by default, so they stay valid after the input changes, while cbor-x returns views into the input. Parsing 15 WebAuthn attestations takes 12.9 µs by default and 7.9 µs with `binaryOwnership: 'borrow'`, against cbor-x's 7.5 µs. On COSE_Sign1 messages pure-cbor is ahead even when copying (5.0 µs against 5.7 µs). Encoding a COSE key, cbor-x is 1.4× faster.
 
 **How this was measured:**
 
-- Node 22.19 on macOS arm64, on pure-cbor 0.5.0. The WebAuthn figures are from 0.6.0, which changed how byte strings are copied.
+- pure-cbor 1.0.2 on Node 22.19, macOS arm64, 25 November 2026, with the machine otherwise idle. The public-data rows are the median of three full runs; the other rows are from one run.
 - cbor-x runs as pure JavaScript, without its optional native addon. cborg uses its defaults, which sort map keys and shrink floats: extra work pure-cbor doesn't do.
 - Each workload runs in its own process; the result is the median of 5 rounds. Treat anything within about ±10% of 1.0× as level.
 - Where pure-cbor is level or behind (arrays of short strings, long text from a reused buffer, some small mixed arrays and objects), the reasons and every other workload are in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
@@ -72,7 +72,7 @@ Small messages, decoded from a new buffer each time, as a just-received message 
 
 **When another library fits better:**
 
-- **Smallest bundle:** cborg is 15–20% smaller. On the public corpus it is 1.4–21× slower, partly because by default it does extra work: it sorts map keys and writes the smallest float. See [BENCHMARK.md](BENCHMARK.md).
+- **Smallest bundle:** cborg is 15–20% smaller. On the public corpus it is 1.5–22× slower, partly because by default it does extra work: it sorts map keys and writes the smallest float. See [BENCHMARK.md](BENCHMARK.md).
 - **Smaller still:** tiny-cbor and cbor-js are a fifth of the size, and do less.
   - tiny-cbor throws on bigints beyond 64 bits, `Date`s, typed arrays, half-precision floats and indefinite lengths.
   - cbor-js turns bigints, `Date`s and `Map`s into `{}` and drops tags.

@@ -2,11 +2,13 @@
 
 Versions before 1.0.0 were named cbor-fp.
 
-Node v22.19.0, macOS arm64. Main tables: pure-cbor 0.5.0 (0.6.0 changed only byte-string copying and `Map`/byte-string encoding; see the flows section). Measured with the machine otherwise idle (load average about 2.4).
+Node v22.19.0, macOS arm64, pure-cbor 1.0.2, measured on 25 November 2026 with the machine otherwise idle (load average 1.6–2.5).
 
 **Libraries:**
 - **cbor-x**: pure JS (native string extraction disabled), in standard CBOR mode (`useRecords: false`).
 - **cborg**: default options. It sorts map keys and writes floats at their smallest exact width, which is extra work pure-cbor and cbor-x don't do.
+- **tiny-cbor, node-cbor (`cbor`), cbor2, cbor-js**: default options. "–" marks a workload a library can't round-trip exactly.
+- **msgpackr, @msgpack/msgpack**: MessagePack, a different format, for reference only.
 
 **Method:**
 - Each workload runs in its **own Node process**. Workloads sharing a process skewed each other's V8 type feedback by up to 2×.
@@ -18,12 +20,12 @@ Node v22.19.0, macOS arm64. Main tables: pure-cbor 0.5.0 (0.6.0 changed only byt
 - **Encode (owned):** an independently owned `Uint8Array`; for cbor-x, `Uint8Array.from(encoder.encode(v))`, since its plain `encode()` returns a view into a reused buffer.
 - **Decode (reused):** the same input buffer every call.
 - **Decode (fresh):** a new copy every call, like a just-received message (only timed for inputs up to 64 KiB).
-- **vs best other:** the faster of cbor-x and cborg divided by pure-cbor; above 1 means pure-cbor is faster.
+- **vs best CBOR:** the fastest other CBOR library's time divided by pure-cbor's; above 1 means pure-cbor is faster. **vs best overall** includes the MessagePack libraries.
 
 Reproduce:
 
 ```sh
-npm install --no-save --package-lock=false cbor-x cborg
+npm install --no-save --package-lock=false cbor-x cborg @levischuck/tiny-cbor cbor cbor2 cbor-js msgpackr @msgpack/msgpack
 BENCH_MS=80 BENCH_ROUNDS=5 npm run bench:isolated
 ```
 
@@ -39,90 +41,90 @@ BENCH_MS=80 BENCH_ROUNDS=5 npm run bench:isolated
 
 ## Results
 
+One full run. The public-corpus rows were run twice more: the medians of the three runs are in the [README](README.md#speed), and the spread is under ±0.05× except where the notes below say otherwise.
+
 ### Encode (owned output)
 
-| Workload | pure-cbor | cbor-x | cborg | vs best other |
-| --- | ---: | ---: | ---: | ---: |
-| uint small † | 25 ns | 109 ns | 80 ns | 3.26× |
-| mixed integers | 29 ns | 120 ns | 94 ns | 3.29× |
-| timestamp † | 30 ns | 114 ns | 135 ns | 3.84× |
-| float64 † | 26 ns | 113 ns | 252 ns | 4.28× |
-| boolean/null † | 19 ns | 116 ns | 84 ns | 4.54× |
-| ASCII 8 | 55 ns | 137 ns | 106 ns | 1.92× |
-| ASCII 32 | 114 ns | 179 ns | 152 ns | 1.34× |
-| ASCII 64 | 424 ns | 448 ns | 388 ns | 0.92× |
-| Unicode 32 | 391 ns | 442 ns | 456 ns | 1.13× |
-| ASCII 4096 | 660 ns | 913 ns | 1314 ns | 1.38× |
-| number[] 128 | 556 ns | 899 ns | 1418 ns | 1.61× |
-| string[] 128 † | 2388 ns | 2715 ns | 3487 ns | 1.14× |
-| mixed[] 128 | 1050 ns | 1201 ns | 1636 ns | 1.14× |
-| number[] 10000 | 43.9 µs | 55.2 µs | 121.2 µs | 1.26× |
-| Float64Array 1 KiB | 392 ns | 844 ns | – | 2.15× |
-| Float64Array 1 MiB | 51.9 µs | 119.6 µs | – | 2.30× |
-| object: row | 208 ns | 291 ns | 497 ns | 1.40× |
-| object: 100 rows | 18.2 µs | 18.9 µs | 43.8 µs | 1.04× |
-| object: nested config | 1453 ns | 1269 ns | 2448 ns | 0.87× |
-| corpus: cbor-x example4 | 16.7 µs | 17.3 µs | 50.0 µs | 1.04× |
-| corpus: msgpack sample-large | 12.0 µs | 14.8 µs | 21.2 µs | 1.24× |
-| corpus: bluesky records 100 | 47.3 µs | 56.5 µs | 66.7 µs | 1.20× |
-| corpus: float mesh 1000 | 214.8 µs | 228.7 µs | 2306.8 µs | 1.06× |
-| corpus: float[] 10000 | 74.3 µs | 111.5 µs | 1566.1 µs | 1.50× |
+| Workload | pure-cbor | cbor-x | cborg | tiny-cbor | cbor (node-cbor) | cbor2 | cbor-js | msgpackr | @msgpack/msgpack | vs best CBOR | vs best overall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| uint small | 19 ns | 107 ns | 84 ns | 451 ns | 2734 ns | 1615 ns | 1044 ns | 116 ns | 493 ns | 4.32× | 4.32× |
+| mixed integers | 27 ns | 115 ns | 95 ns | 458 ns | 2703 ns | 1355 ns | 1220 ns | 120 ns | 476 ns | 3.57× | 3.57× |
+| timestamp | 27 ns | 111 ns | 140 ns | 466 ns | 2569 ns | 1324 ns | 1188 ns | 116 ns | 447 ns | 4.11× | 4.11× |
+| float64 | 24 ns | 111 ns | 260 ns | 491 ns | 2262 ns | 1353 ns | 1190 ns | 118 ns | 492 ns | 4.68× | 4.68× |
+| boolean/null | 17 ns | 113 ns | 85 ns | 32 ns | 2296 ns | 1377 ns | 1212 ns | 118 ns | 472 ns | 1.84× | 1.84× |
+| ASCII 8 | 46 ns | 123 ns | 105 ns | 1056 ns | 2267 ns | 1770 ns | 975 ns | 130 ns | 479 ns | 2.31× | 2.31× |
+| ASCII 32 | 102 ns | 177 ns | 161 ns | 1007 ns | 2375 ns | 2844 ns | 1045 ns | 187 ns | 563 ns | 1.57× | 1.57× |
+| ASCII 64 | 518 ns | 503 ns | 480 ns | 1533 ns | 2601 ns | 3254 ns | 1198 ns | 482 ns | 547 ns | 0.93× | 0.93× |
+| Unicode 32 | 538 ns | 489 ns | 498 ns | 1612 ns | 2652 ns | 2192 ns | 1197 ns | 575 ns | 585 ns | 0.91× | 0.91× |
+| ASCII 4096 | 650 ns | 771 ns | 1270 ns | 1592 ns | 4321 ns | 3291 ns | 19.5 µs | 876 ns | 7698 ns | 1.19× | 1.19× |
+| number[] 128 | 605 ns | 941 ns | 1391 ns | 62.5 µs | 20.7 µs | 3053 ns | 3176 ns | 900 ns | 996 ns | 1.55× | 1.49× |
+| string[] 128 | 2287 ns | 2741 ns | 3433 ns | 134.8 µs | 24.8 µs | 69.6 µs | 6992 ns | 2469 ns | 3583 ns | 1.20× | 1.08× |
+| mixed[] 128 | 1403 ns | 1218 ns | 1652 ns | 51.2 µs | 17.4 µs | 16.3 µs | 3590 ns | 1156 ns | 1640 ns | 0.87× | 0.82× |
+| number[] 10000 | 43.4 µs | 55.2 µs | 118.6 µs | 4756.6 µs | 1632.7 µs | 120.4 µs | 231.5 µs | 55.0 µs | 87.0 µs | 1.27× | 1.27× |
+| Float64Array 1 KiB | 439 ns | 848 ns | – | – | 2998 ns | 1786 ns | – | – | – | 1.93× | 1.93× |
+| Float64Array 1 MiB | 48.8 µs | 109.9 µs | – | – | 109.6 µs | 48.5 µs | – | – | – | 1.00× | 1.00× |
+| object: row | 177 ns | 288 ns | 500 ns | 9808 ns | 4132 ns | 13.6 µs | 1226 ns | 282 ns | 629 ns | 1.63× | 1.59× |
+| object: 100 rows | 18.3 µs | 17.9 µs | 42.3 µs | 765.4 µs | 257.9 µs | 1211.3 µs | 51.6 µs | 17.2 µs | 28.3 µs | 0.98× | 0.94× |
+| object: nested config | 1171 ns | 1314 ns | 2249 ns | 81.8 µs | 18.6 µs | 83.5 µs | 3660 ns | 1271 ns | 1957 ns | 1.12× | 1.08× |
+| corpus: cbor-x example4 | 14.7 µs | 20.6 µs | 50.4 µs | 638.2 µs | 133.9 µs | 656.3 µs | 41.1 µs | 15.2 µs | 23.5 µs | 1.40× | 1.04× |
+| corpus: msgpack sample-large | 12.0 µs | 14.6 µs | 21.3 µs | 232.7 µs | 82.9 µs | 387.7 µs | 60.1 µs | 11.8 µs | 23.4 µs | 1.22× | 0.98× |
+| corpus: bluesky records 100 | 46.0 µs | 55.6 µs | 65.2 µs | 1237.7 µs | 317.8 µs | 1310.5 µs | 146.0 µs | 45.7 µs | 80.2 µs | 1.21× | 0.99× |
+| corpus: float mesh 1000 | 240.8 µs | 221.1 µs | 2282.4 µs | 7846.0 µs | – | 3663.1 µs | 507.3 µs | 162.5 µs | 280.3 µs | 0.92× | 0.68× |
+| corpus: float[] 10000 | 69.7 µs | 108.0 µs | 1505.8 µs | 3495.3 µs | – | 115.7 µs | 246.9 µs | 74.7 µs | 122.0 µs | 1.55× | 1.07× |
 
 ### Decode (reused input)
 
-| Workload | pure-cbor | cbor-x | cborg | vs best other |
-| --- | ---: | ---: | ---: | ---: |
-| uint small † | 10 ns | 22 ns | 73 ns | 2.14× |
-| mixed integers | 16 ns | 24 ns | 157 ns | 1.50× |
-| timestamp † | 15 ns | 24 ns | 104 ns | 1.59× |
-| float64 † | 15 ns | 24 ns | 114 ns | 1.58× |
-| boolean/null † | 13 ns | 24 ns | 80 ns | 1.88× |
-| ASCII 8 | 24 ns | 35 ns | 137 ns | 1.49× |
-| ASCII 32 | 53 ns | 119 ns | 137 ns | 2.23× |
-| ASCII 64 | 75 ns | 223 ns | 159 ns | 2.10× |
-| Unicode 32 | 247 ns | 245 ns | 329 ns | 0.99× |
-| ASCII 4096 | 366 ns | 343 ns | 391 ns | 0.94× |
-| number[] 128 | 451 ns | 566 ns | 1761 ns | 1.25× |
-| string[] 128 † | 2316 ns | 2187 ns | 5191 ns | 0.94× |
-| mixed[] 128 | 951 ns | 904 ns | 1840 ns | 0.95× |
-| number[] 10000 | 45.9 µs | 47.3 µs | 145.0 µs | 1.03× |
-| Float64Array 1 KiB | 410 ns | 735 ns | – | 1.79× |
-| Float64Array 1 MiB | 51.1 µs | 116.6 µs | – | 2.28× |
-| object: row | 210 ns | 301 ns | 614 ns | 1.44× |
-| object: 100 rows | 21.1 µs | 29.1 µs | 50.5 µs | 1.38× |
-| object: nested config | 1259 ns | 1309 ns | 3313 ns | 1.04× |
-| corpus: cbor-x example4 | 19.4 µs | 22.4 µs | 40.4 µs | 1.16× |
-| corpus: msgpack sample-large | 12.0 µs | 20.5 µs | 27.8 µs | 1.71× |
-| corpus: bluesky records 100 | 46.6 µs | 71.2 µs | 86.2 µs | 1.53× |
-| corpus: float mesh 1000 | 183.7 µs | 301.3 µs | 845.3 µs | 1.64× |
-| corpus: float[] 10000 | 34.0 µs | 51.7 µs | 454.3 µs | 1.52× |
+| Workload | pure-cbor | cbor-x | cborg | tiny-cbor | cbor (node-cbor) | cbor2 | cbor-js | msgpackr | @msgpack/msgpack | vs best CBOR | vs best overall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| uint small | 10 ns | 21 ns | 79 ns | 50 ns | 1701 ns | 696 ns | 101 ns | 35 ns | 85 ns | 2.05× | 2.05× |
+| mixed integers | 13 ns | 23 ns | 91 ns | 79 ns | 1423 ns | 631 ns | 99 ns | 36 ns | 86 ns | 1.75× | 1.75× |
+| timestamp | 14 ns | 23 ns | 111 ns | 101 ns | 1389 ns | 643 ns | 102 ns | 37 ns | 84 ns | 1.64× | 1.64× |
+| float64 | 14 ns | 23 ns | 117 ns | 50 ns | 1657 ns | 636 ns | 101 ns | 37 ns | 85 ns | 1.57× | 1.57× |
+| boolean/null | 12 ns | 23 ns | 84 ns | 52 ns | 1294 ns | 642 ns | 96 ns | 35 ns | 91 ns | 1.89× | 1.89× |
+| ASCII 8 | 20 ns | 33 ns | 118 ns | 600 ns | 1659 ns | 712 ns | 148 ns | 45 ns | 118 ns | 1.66× | 1.66× |
+| ASCII 32 | 54 ns | 117 ns | 145 ns | 597 ns | 1849 ns | 743 ns | 234 ns | 137 ns | 188 ns | 2.18× | 2.18× |
+| ASCII 64 | 72 ns | 210 ns | 144 ns | 610 ns | 1799 ns | 738 ns | 360 ns | 243 ns | 294 ns | 2.01× | 2.01× |
+| Unicode 32 | 309 ns | 247 ns | 296 ns | 668 ns | 1995 ns | 891 ns | 314 ns | 265 ns | 210 ns | 0.80× | 0.68× |
+| ASCII 4096 | 357 ns | 358 ns | 390 ns | 844 ns | 2235 ns | 1040 ns | 18.5 µs | 408 ns | 438 ns | 1.00× | 1.00× |
+| number[] 128 | 443 ns | 562 ns | 1748 ns | 4480 ns | 21.9 µs | 10.2 µs | 1161 ns | 608 ns | 604 ns | 1.27× | 1.27× |
+| string[] 128 | 2282 ns | 2158 ns | 5144 ns | 75.9 µs | 30.1 µs | 20.4 µs | 4540 ns | 1936 ns | 3902 ns | 0.95× | 0.85× |
+| mixed[] 128 | 937 ns | 880 ns | 1857 ns | 18.2 µs | 20.2 µs | 14.2 µs | 1700 ns | 887 ns | 1401 ns | 0.94× | 0.94× |
+| number[] 10000 | 45.4 µs | 46.0 µs | 142.2 µs | 381.0 µs | 1754.0 µs | 723.1 µs | 82.6 µs | 37.1 µs | 41.3 µs | 1.01× | 0.82× |
+| Float64Array 1 KiB | 426 ns | 676 ns | – | – | 3141 ns | 1161 ns | – | – | – | 1.59× | 1.59× |
+| Float64Array 1 MiB | 46.8 µs | 111.2 µs | – | – | 54.9 µs | 150.2 µs | – | – | – | 1.17× | 1.17× |
+| object: row | 205 ns | 290 ns | 585 ns | 5209 ns | 4656 ns | 3308 ns | 510 ns | 189 ns | 351 ns | 1.42× | 0.92× |
+| object: 100 rows | 20.9 µs | 28.6 µs | 51.1 µs | 538.7 µs | 334.8 µs | 286.1 µs | 41.5 µs | 26.7 µs | 24.2 µs | 1.37× | 1.16× |
+| object: nested config | 1235 ns | 1306 ns | 2071 ns | 40.4 µs | 25.7 µs | 21.0 µs | 2262 ns | 1139 ns | 1964 ns | 1.06× | 0.92× |
+| corpus: cbor-x example4 | 18.8 µs | 22.7 µs | 39.7 µs | 300.6 µs | 190.7 µs | 180.2 µs | 35.8 µs | 20.5 µs | 23.2 µs | 1.20× | 1.09× |
+| corpus: msgpack sample-large | 12.0 µs | 20.6 µs | 28.1 µs | 204.0 µs | 110.8 µs | 89.7 µs | 40.8 µs | 19.3 µs | 20.0 µs | 1.72× | 1.61× |
+| corpus: bluesky records 100 | 45.9 µs | 71.2 µs | 85.5 µs | 634.0 µs | 413.3 µs | 320.7 µs | 119.8 µs | 67.3 µs | 85.4 µs | 1.55× | 1.47× |
+| corpus: float mesh 1000 | 184.0 µs | 299.8 µs | 844.0 µs | 1510.4 µs | – | 4174.2 µs | 391.4 µs | 290.3 µs | 177.2 µs | 1.63× | 0.96× |
+| corpus: float[] 10000 | 33.5 µs | 51.7 µs | 438.9 µs | 143.5 µs | – | 1045.1 µs | 82.0 µs | 48.6 µs | 53.3 µs | 1.54× | 1.45× |
 
 ### Decode (fresh input)
 
-| Workload | pure-cbor | cbor-x | cborg | vs best other |
-| --- | ---: | ---: | ---: | ---: |
-| uint small † | 34 ns | 455 ns | 426 ns | 12.60× |
-| mixed integers | 45 ns | 448 ns | 561 ns | 9.92× |
-| timestamp † | 40 ns | 501 ns | 478 ns | 12.03× |
-| float64 † | 38 ns | 504 ns | 465 ns | 12.15× |
-| boolean/null † | 36 ns | 401 ns | 485 ns | 11.10× |
-| ASCII 8 | 49 ns | 453 ns | 487 ns | 9.29× |
-| ASCII 32 | 81 ns | 447 ns | 418 ns | 5.19× |
-| ASCII 64 | 456 ns | 530 ns | 445 ns | 0.98× |
-| Unicode 32 | 503 ns | 550 ns | 689 ns | 1.09× |
-| ASCII 4096 | 722 ns | 822 ns | 743 ns | 1.03× |
-| number[] 128 | 685 ns | 904 ns | 1948 ns | 1.32× |
-| string[] 128 † | 2499 ns | 2422 ns | 5487 ns | 0.97× |
-| mixed[] 128 | 1131 ns | 1145 ns | 2009 ns | 1.01× |
-| number[] 10000 | 46.8 µs | 48.4 µs | 143.8 µs | 1.03× |
-| Float64Array 1 KiB | 806 ns | 1140 ns | – | 1.41× |
-| object: row | 236 ns | 567 ns | 820 ns | 2.40× |
-| object: 100 rows | 21.3 µs | 29.8 µs | 51.5 µs | 1.40× |
-| object: nested config | 1475 ns | 1536 ns | 3028 ns | 1.04× |
-| corpus: cbor-x example4 | 19.4 µs | 23.2 µs | 41.1 µs | 1.19× |
-| corpus: msgpack sample-large | 12.4 µs | 21.0 µs | 28.4 µs | 1.70× |
-
-† A full run is one process per workload. In that run these five workloads hit system noise: for example, float64 decode took 34 ns there, against 15 ns in 0.4.0 and in five repeats. Their rows are the median of three further fresh-process runs.
+| Workload | pure-cbor | cbor-x | cborg | tiny-cbor | cbor (node-cbor) | cbor2 | cbor-js | msgpackr | @msgpack/msgpack | vs best CBOR | vs best overall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| uint small | 32 ns | 387 ns | 455 ns | 425 ns | 1895 ns | 896 ns | 641 ns | 430 ns | 459 ns | 11.94× | 11.94× |
+| mixed integers | 38 ns | 427 ns | 450 ns | 437 ns | 1648 ns | 838 ns | 577 ns | 504 ns | 502 ns | 11.36× | 11.36× |
+| timestamp | 37 ns | 471 ns | 465 ns | 441 ns | 1567 ns | 854 ns | 622 ns | 475 ns | 515 ns | 11.89× | 11.89× |
+| float64 | 37 ns | 476 ns | 469 ns | 441 ns | 2034 ns | 834 ns | 591 ns | 470 ns | 503 ns | 11.84× | 11.84× |
+| boolean/null | 35 ns | 505 ns | 475 ns | 518 ns | 1534 ns | 845 ns | 615 ns | 489 ns | 495 ns | 13.42× | 13.42× |
+| ASCII 8 | 45 ns | 521 ns | 493 ns | 1190 ns | 2084 ns | 917 ns | 591 ns | 503 ns | 464 ns | 10.93× | 10.28× |
+| ASCII 32 | 81 ns | 457 ns | 424 ns | 1057 ns | 2183 ns | 939 ns | 652 ns | 463 ns | 499 ns | 5.23× | 5.23× |
+| ASCII 64 | 475 ns | 523 ns | 456 ns | 1107 ns | 2175 ns | 929 ns | 784 ns | 579 ns | 578 ns | 0.96× | 0.96× |
+| Unicode 32 | 483 ns | 545 ns | 537 ns | 1110 ns | 2338 ns | 1091 ns | 736 ns | 611 ns | 531 ns | 1.11× | 1.10× |
+| ASCII 4096 | 868 ns | 745 ns | 742 ns | 1463 ns | 2622 ns | 1497 ns | 19.9 µs | 901 ns | 909 ns | 0.85× | 0.85× |
+| number[] 128 | 690 ns | 884 ns | 1936 ns | 4651 ns | 22.2 µs | 10.4 µs | 1458 ns | 867 ns | 820 ns | 1.28× | 1.19× |
+| string[] 128 | 2463 ns | 2383 ns | 5365 ns | 74.5 µs | 30.1 µs | 20.0 µs | 4863 ns | 2192 ns | 4130 ns | 0.97× | 0.89× |
+| mixed[] 128 | 1133 ns | 1115 ns | 2029 ns | 20.0 µs | 20.5 µs | 14.4 µs | 1974 ns | 1118 ns | 1545 ns | 0.98× | 0.98× |
+| number[] 10000 | 46.2 µs | 48.4 µs | 141.7 µs | 382.8 µs | 1758.5 µs | 725.7 µs | 83.8 µs | 39.2 µs | 42.2 µs | 1.05× | 0.85× |
+| Float64Array 1 KiB | 877 ns | 1308 ns | – | – | 3058 ns | 1503 ns | – | – | – | 1.49× | 1.49× |
+| object: row | 232 ns | 569 ns | 806 ns | 5418 ns | 5440 ns | 3519 ns | 846 ns | 528 ns | 591 ns | 2.45× | 2.27× |
+| object: 100 rows | 21.3 µs | 30.2 µs | 51.4 µs | 550.1 µs | 337.3 µs | 285.3 µs | 44.1 µs | 26.9 µs | 24.5 µs | 1.42× | 1.15× |
+| object: nested config | 1422 ns | 1541 ns | 2222 ns | 41.6 µs | 25.9 µs | 21.2 µs | 2522 ns | 1381 ns | 2023 ns | 1.08× | 0.97× |
+| corpus: cbor-x example4 | 19.4 µs | 23.2 µs | 39.9 µs | 295.7 µs | 192.7 µs | 181.6 µs | 36.5 µs | 21.1 µs | 23.6 µs | 1.19× | 1.08× |
+| corpus: msgpack sample-large | 12.3 µs | 20.9 µs | 28.3 µs | 198.9 µs | 110.9 µs | 90.0 µs | 41.6 µs | 19.7 µs | 20.4 µs | 1.70× | 1.60× |
 
 ## Reading the results
 
@@ -136,19 +138,21 @@ BENCH_MS=80 BENCH_ROUNDS=5 npm run bench:isolated
 
 Treat anything within about ±10% of 1.0 as level. A whole run can also shift when the machine is busy. One run under load showed 10,000-integer decode at 0.74×; run alone it was consistently 1.04×.
 
-**On public data, pure-cbor is fastest in every corpus measurement.**
-- Decoding: 1.16–1.71× faster than the next-fastest library.
-- Encoding: from level (cbor-x's example document 1.04×, the float mesh 1.06×) to 1.50× faster.
-- On cbor-x's own benchmark document, pure-cbor encodes 1.04× and decodes 1.16× faster than cbor-x.
+**On public data, pure-cbor decodes fastest in every corpus measurement.**
+- Decoding: 1.21–1.72× faster than the next-fastest CBOR library (medians of three runs).
+- Encoding: from 0.93× (the float mesh, where cbor-x is slightly ahead: 0.92–1.01× over four runs) to 1.55× faster.
+- On cbor-x's own benchmark document, pure-cbor encodes 1.15× and decodes 1.21× faster than cbor-x.
 
-**Where cbor-x is level or ahead, and why:**
-- **Arrays of 3–7 character strings, decoded** (0.92–0.97×). The time is dominated by allocating many tiny strings, which every library pays.
-- **Long text decoded from a reused buffer** (ASCII 4096, about 0.9×). Both hand long text to `TextDecoder`, but pure-cbor's is **strict** and rejects invalid UTF-8, while cbor-x's silently replaces it. With fresh input they are level.
-- **Mixed and tiny-object encoding** (`mixed[]`, nested config): level within noise.
-- **Encoding 64-byte strings:** cborg is 8% faster (0.92×). At that size every library pays one off-heap allocation for the output, which dominates.
-- **cbor-x records mode** is not in the tables: it's a non-standard wire format both ends must speak. Measured separately, it decodes 100 rows in about 8.6 µs (2.6× faster than pure-cbor) and halves the bytes. It does that by generating object readers with `new Function`. pure-cbor stays standard CBOR and avoids code generation.
+**Where pure-cbor is level or behind, and why:**
+- **Arrays of short strings and mixed arrays** (`string[] 128`, `mixed[] 128`): 0.87–0.98×. The time goes on allocating many tiny strings and values, which every library pays.
+- **Long text from a fresh buffer** (ASCII 4096, 0.85×). Both hand long text to `TextDecoder`, but pure-cbor's is **strict** and rejects invalid UTF-8, while cbor-x's silently replaces it. From a reused buffer they are level (1.00×).
+- **Encoding 64-byte and Unicode strings**: 0.91–0.93× in the full run, 1.04–1.37× for Unicode in three reruns: level within noise. At that size every library pays one off-heap allocation for the output.
+- **The float mesh, encoded**: cbor-x is about 7% faster.
+- **cbor-x records mode** is not in the tables: it's a non-standard wire format both ends must speak. Measured separately, it decodes 100 rows in about 8.6 µs (2.4× faster than pure-cbor) and halves the bytes. It does that by generating object readers with `new Function`. pure-cbor stays standard CBOR and generates no code.
 
-**The other CBOR libraries.** A full run against all six (cbor-x, cborg, tiny-cbor, node-cbor, cbor2 and cbor-js; `npm run bench:isolated` with them installed) was made on a loaded machine, so its absolute times aren't published here. On the public corpus, pure-cbor was ahead of or level with every one of them: cbor-x was the fastest of the others on every corpus decode, and cbor-x or cbor2 on corpus encode.
+**The other CBOR libraries.** tiny-cbor, node-cbor, cbor2 and cbor-js are slower than pure-cbor in every workload but two (cbor2 encodes a 1 MiB `Float64Array` level, 0.99×; cbor-js decodes Unicode 32 level, 1.02×). Across all workloads the median is 13× slower.
+
+**MessagePack.** msgpackr is faster than pure-cbor on a few workloads, most of all the float mesh (1.48× when encoding) and large integer arrays (1.2× when decoding). It writes a different format, so it's here for reference only.
 
 **cborg** is slower across the board here. Part of that is its defaults: it sorts every map's keys and finds the smallest exact float width for every number. Those choices give deterministic, compact output, which pure-cbor and cbor-x don't attempt. For float-heavy data the cost is large: 10–20× slower encoding.
 
@@ -222,23 +226,23 @@ Before timing, every library must produce the same result as pure-cbor, and pure
 
 | Flow | pure-cbor | pure-cbor (borrow) | cbor-x | cborg | tiny-cbor | cbor (node-cbor) | cbor2 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| WebAuthn: parse 15 attestations, extract each COSE key | 21.7 µs | 7.6 µs | 7.9 µs | 24.4 µs | 90.8 µs | 153.9 µs | 75.0 µs |
-| COSE_Sign1: decode + build `Sig_structure` (7 messages) | 11.7 µs | 5.5 µs | 6.3 µs | 8.2 µs | 39.2 µs | 57.9 µs | 32.5 µs |
-| CWT: token + claims (RFC 8392 A.3, A.4) | 1.43 µs | 1.00 µs | 0.95 µs | 2.08 µs | 8.5 µs | 13.4 µs | 7.2 µs |
-| mdoc: device response + items + MSO | 8.5 µs | 6.0 µs | 6.5 µs | 14.2 µs | 69.0 µs | 59.9 µs | 43.9 µs |
-| COSE_Key: encode | 692 ns | 686 ns | 474 ns | 862 ns | 6.3 µs | 3.4 µs | 9.7 µs |
+| WebAuthn: parse 15 attestations | 12.9 µs | 7878 ns | 7494 ns | 23.9 µs | 98.4 µs | 126.7 µs | 66.1 µs |
+| COSE_Sign1: decode + Sig_structure (7 messages) | 4968 ns | 4192 ns | 5747 ns | 8120 ns | 39.1 µs | 57.6 µs | 31.2 µs |
+| CWT: token + claims (RFC 8392 A.3, A.4) | 1522 ns | 1011 ns | 951 ns | 2132 ns | 8703 ns | 11.7 µs | 7112 ns |
+| mdoc: device response + items + MSO | 7097 ns | 6194 ns | 6258 ns | 13.8 µs | 69.8 µs | 59.9 µs | 44.0 µs |
+| COSE_Key: encode | 678 ns | 635 ns | 471 ns | 868 ns | 6125 ns | 3304 ns | 9166 ns |
 
 How pure-cbor compares (fastest other library divided by pure-cbor; above 1 means pure-cbor is faster):
 
 | Flow | pure-cbor (default) | pure-cbor (borrow) |
 | --- | ---: | ---: |
-| WebAuthn | 0.37× | 1.04× |
-| COSE_Sign1 | 0.54× | 1.15× |
-| CWT | 0.66× | 0.95× |
-| mdoc | 0.76× | 1.07× |
-| COSE_Key encode | 0.69× | 0.69× |
+| WebAuthn | 0.58× | 0.95× |
+| COSE_Sign1 | 1.16× | 1.37× |
+| CWT | 0.62× | 0.94× |
+| mdoc | 0.88× | 1.01× |
+| COSE_Key encode | 0.69× | 0.74× |
 
-The table above was measured on 0.5.0. In 0.6.0 the default mode copies byte strings into one per-decode arena, and `Map` and byte strings encode through inline fast paths. Measured in one process against 0.5.0 (bursts alternated, so machine load affects both builds equally):
+One run, measured on 1.0.2. History: in 0.6.0 the default mode began copying byte strings into one per-decode arena, and `Map` and byte strings gained inline encode paths. Measured in one process against 0.5.0 (bursts alternated, so machine load affects both builds equally):
 
 | | 0.5.0 | 0.6.0 |
 | --- | ---: | ---: |
@@ -252,8 +256,8 @@ The table above was measured on 0.5.0. In 0.6.0 the default mode copies byte str
 
 - **Byte-string copies dominate these formats.** Certificates, signatures and keys make COSE and WebAuthn messages mostly byte strings, and in V8 every separate copy over 64 bytes is a ~0.5 µs allocation. Since 0.6.0 the default copy puts all of a message's large byte strings into one arena, so a message costs about one allocation. That halves the default mode's time on these flows.
 - **Borrow mode** (views into the input, as cbor-x does by default) is fastest and level with or ahead of cbor-x. It's safe while the input stays unchanged, which is the normal case when verifying a message.
-- **The libraries WebAuthn and COSE packages actually use** (tiny-cbor, node-cbor, cbor2) are **5–20× slower** than pure-cbor in every flow.
-- **Encoding a COSE_Key:** cbor-x was 1.4× faster than pure-cbor 0.5.0. With 0.6.0's `Map` and byte-string fast paths, pure-cbor is now slightly ahead.
+- **The libraries WebAuthn and COSE packages actually use** (tiny-cbor, node-cbor, cbor2) are **5–14× slower** than pure-cbor in every flow.
+- **Encoding a COSE_Key:** cbor-x is about 1.4× faster (471 vs 678 ns), each library in its own process. The 0.6.0 comparison above, run in one shared process, had pure-cbor slightly ahead; the separate-process numbers are the ones to trust.
 - **Byte types differ across libraries:**
   - In Node, cbor-x and node-cbor write a plain `Uint8Array` as an RFC 8746 typed array (tag 64), not a byte string. Worse, when cbor-x decodes from a plain `Uint8Array`, the byte strings it returns re-encode that way. A `Sig_structure` built from them silently comes out different, so signature checks would fail. With `Buffer` inputs both libraries behave.
   - cbor2 writes a Node `Buffer` as a `{ type, data }` map.
