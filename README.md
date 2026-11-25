@@ -2,10 +2,12 @@
 
 CBOR for JavaScript and TypeScript, with two promises:
 
-1. **Clean, functional code.** Pure functions over explicit state, in the spirit of OCaml: no classes (apart from the error type), no state kept between calls apart from a documented cache of decoded map keys, immutable tagged variants, and one named set of wire constants. About 2,800 lines of strict TypeScript, with no runtime dependencies, no Node APIs and no generated code (CSP-safe).
+1. **Clean, functional code.** Pure functions over explicit state, in the spirit of OCaml: no classes (apart from the error type), no state kept between calls apart from two documented caches (decoded map keys, and one write function per encode-option set), immutable tagged variants, and one named set of wire constants. About 2,800 lines of strict TypeScript, with no runtime dependencies, no Node APIs and no generated code (CSP-safe).
 2. **The fastest standard CBOR library for JavaScript.** Pure JS, no native addon. On public benchmark data it decodes 1.16–1.71× faster than cbor-x, the next fastest of the six other CBOR libraries measured, and encodes level with it to 1.50× faster (cbor-x also measured as pure JS, without its optional native addon). Small messages decoded from a fresh buffer are 5–12× faster. It isn't ahead everywhere: some small mixed arrays and objects are level, and on COSE and WebAuthn messages it matches cbor-x only with `binaryOwnership: 'borrow'`, since cbor-x returns views into the input by default while pure-cbor copies. Details in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
 
 It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple values, typed arrays), deterministic encoding, CBOR sequences over Web Streams, and COSE, CWT, WebAuthn and mdoc messages, checked against their published test vectors. Standard CBOR only: no private wire format.
+
+**[Read the guided tour of the code →](https://davidgtonge.github.io/pure-cbor/)** Its principles, and how a value flows through encode and decode, with diagrams and excerpts from the source.
 
 ## Install
 
@@ -55,7 +57,8 @@ The codecs have no hidden operation state. The shared module resources are:
 - constants and a tag lookup;
 - standard UTF-8 encoders/decoders, used with non-streaming calls;
 - two scratch areas used only within one synchronous call: a one-element float array for float/byte conversion, and the owned-output staging buffer;
-- a decoded-key cache (see below).
+- a decoded-key cache (see below);
+- one write function per non-default encode-option set, built on first use (it holds no data).
 
 Decoding a container creates one small state record (cursor, depth, limits) for that call and passes it down explicitly.
 
@@ -151,7 +154,7 @@ encoder.flush(send);
 - Errors carry absolute stream offsets.
 
 **Limits**
-- `maxItemBytes` (default 16 MiB) caps one item's encoded size. It's checked from headers before the bytes arrive, so a short header claiming a 4 GB string can't make the decoder buffer it.
+- `maxItemBytes` (default 16 MiB) caps one item's encoded size. For an item that runs past the end of a chunk it's checked from headers before the bytes arrive, so a short header claiming a 4 GB string can't make the decoder buffer it. An item that arrives whole within one chunk is decoded in place and then checked.
 - All decode limits (`maxDepth`, `maxArrayLength`, `maxMapEntries`, the allocation budget) apply to each item.
 
 **Encoding**

@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Streaming · pure-cbor</title>
+<meta name="description" content="How pure-cbor decodes CBOR sequences split across chunks: the resumable boundary scanner, the assembly buffer, SCAN_AHEAD_BYTES, and the Web Streams adapters around the incremental core.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%231f55b8'/%3E%3Crect x='7' y='9' width='5' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='14' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='19' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='24' y='9' width='2' height='14' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect class="brand-mark-frame" x="1" y="1" width="30" height="30" rx="8"/><rect class="brand-mark-bits" x="7" y="9" width="5" height="14" rx="1.5"/><rect class="brand-mark-bits" x="14" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="19" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="24" y="9" width="2" height="14" rx="1" opacity=".75"/></svg><span>pure-cbor</span></a>
+    <nav class="site-nav" aria-label="Site">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="principles.html">Principles</a></li>
+        <li><a href="encode.html">Encode</a></li>
+        <li><a href="decode.html">Decode</a></li>
+        <li><a href="streaming.html" aria-current="page">Streaming</a></li>
+        <li><a href="performance.html">Performance</a></li>
+        <li><a href="correctness.html">Correctness</a></li>
+        <li><a href="modules.html">Module map</a></li>
+      </ul>
+    </nav>
+    <a class="header-github" href="https://github.com/davidgtonge/pure-cbor"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+  </div>
+</header>
+<div class="page">
+  <main id="content" class="article">
+<header class="page-intro">
+  <p class="eyebrow">The tour · 4 of 7</p>
+  <h1>Streaming</h1>
+  <p class="lede">A CBOR sequence (RFC 8742) is complete CBOR items written back to back. Over a network they arrive in chunks, and an item can be cut anywhere. pure-cbor decodes the items that sit inside a chunk in place, and gathers the rest with a scanner that reads headers only.</p>
+</header>
+<details class="toc-mobile"><summary>On this page</summary><div data-toc></div></details>
+
+<section aria-labelledby="layers">
+  <h2 id="layers">Two layers</h2>
+  <p><code>sequence.ts</code> is an incremental core with no stream APIs in it. It can be fed from WebSocket messages, Node <code>'data'</code> events or tests. <code>stream.ts</code> is a thin layer of Web Streams and async-iterator adapters over it, which touches stream globals only when called.</p>
+  <figure class="diagram">
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 880 300" role="img" aria-labelledby="stream-layers-title stream-layers-description">
+        <title id="stream-layers-title">Streaming layers</title>
+        <desc id="stream-layers-description">Decoding: a byte source, which is a ReadableStream or an async or sync iterable, feeds decodeStream or decodeSequence in stream.ts. Both call push(chunk, onValue) and end() on createSequenceDecoder in sequence.ts, which decodes items with read and readWhole from codec.ts. Encoding: values from an iterable, async iterable or the writable side of a stream feed encodeStream or encodeSequence in stream.ts. Both call push(value, onChunk) and flush(onChunk) on createSequenceEncoder in sequence.ts, which uses encode() for one chunk per value, or writerFor and a growable chunk when chunkBytes is set.</desc>
+        <defs>
+          <marker id="layers-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="dg-arrowhead" d="M0 0L10 5L0 10z"/></marker>
+        </defs>
+        <text class="dg-label" x="105" y="18" text-anchor="middle">input</text>
+        <text class="dg-label" x="330" y="18" text-anchor="middle">stream.ts: adapters</text>
+        <text class="dg-label" x="570" y="18" text-anchor="middle">sequence.ts: incremental core</text>
+        <text class="dg-label" x="785" y="18" text-anchor="middle">codec</text>
+
+        <rect class="dg-box-muted" x="20" y="32" width="170" height="104" rx="8"/>
+        <text class="dg-label-strong" x="105" y="62" text-anchor="middle">Byte chunks</text>
+        <text class="dg-text" x="105" y="82" text-anchor="middle">ReadableStream,</text>
+        <text class="dg-text" x="105" y="98" text-anchor="middle">async or sync iterable</text>
+        <text class="dg-text" x="105" y="114" text-anchor="middle">(e.g. response.body)</text>
+
+        <rect class="dg-box" x="230" y="32" width="200" height="48" rx="8"/>
+        <text class="dg-title" x="330" y="54" text-anchor="middle">decodeStream()</text>
+        <text class="dg-label" x="330" y="70" text-anchor="middle">TransformStream</text>
+        <rect class="dg-box" x="230" y="88" width="200" height="48" rx="8"/>
+        <text class="dg-title" x="330" y="110" text-anchor="middle">decodeSequence()</text>
+        <text class="dg-label" x="330" y="126" text-anchor="middle">async generator</text>
+
+        <rect class="dg-box-accent" x="470" y="32" width="200" height="104" rx="8"/>
+        <text class="dg-title" x="570" y="60" text-anchor="middle">createSequenceDecoder</text>
+        <text class="dg-mono" x="570" y="84" text-anchor="middle">push(chunk, onValue)</text>
+        <text class="dg-mono" x="570" y="100" text-anchor="middle">end()</text>
+        <text class="dg-label" x="570" y="120" text-anchor="middle">scanner + assembly buffer</text>
+
+        <rect class="dg-box" x="710" y="52" width="150" height="64" rx="8"/>
+        <text class="dg-title" x="785" y="78" text-anchor="middle">read()</text>
+        <text class="dg-title" x="785" y="96" text-anchor="middle">readWhole()</text>
+
+        <path class="dg-line" d="M190 84 L226 56" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M190 84 L226 112" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M430 56 L466 76" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M430 112 L466 92" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M670 84 L706 84" marker-end="url(#layers-arrow)"/>
+
+        <rect class="dg-box-muted" x="20" y="172" width="170" height="104" rx="8"/>
+        <text class="dg-label-strong" x="105" y="202" text-anchor="middle">Values</text>
+        <text class="dg-text" x="105" y="222" text-anchor="middle">iterable, async iterable,</text>
+        <text class="dg-text" x="105" y="238" text-anchor="middle">or a stream's writable side</text>
+        <text class="dg-text" x="105" y="254" text-anchor="middle">(arrays with batch: true)</text>
+
+        <rect class="dg-box" x="230" y="172" width="200" height="48" rx="8"/>
+        <text class="dg-title" x="330" y="194" text-anchor="middle">encodeStream()</text>
+        <text class="dg-label" x="330" y="210" text-anchor="middle">TransformStream</text>
+        <rect class="dg-box" x="230" y="228" width="200" height="48" rx="8"/>
+        <text class="dg-title" x="330" y="250" text-anchor="middle">encodeSequence()</text>
+        <text class="dg-label" x="330" y="266" text-anchor="middle">ReadableStream, pulls lazily</text>
+
+        <rect class="dg-box-accent" x="470" y="172" width="200" height="104" rx="8"/>
+        <text class="dg-title" x="570" y="200" text-anchor="middle">createSequenceEncoder</text>
+        <text class="dg-mono" x="570" y="224" text-anchor="middle">push(value, onChunk)</text>
+        <text class="dg-mono" x="570" y="240" text-anchor="middle">flush(onChunk)</text>
+        <text class="dg-label" x="570" y="260" text-anchor="middle">chunkBytes: 0 or N</text>
+
+        <rect class="dg-box" x="710" y="182" width="150" height="84" rx="8"/>
+        <text class="dg-title" x="785" y="206" text-anchor="middle">encode()</text>
+        <text class="dg-label" x="785" y="222" text-anchor="middle">when chunkBytes is 0</text>
+        <text class="dg-title" x="785" y="244" text-anchor="middle">writerFor()</text>
+        <text class="dg-label" x="785" y="259" text-anchor="middle">into a growable chunk</text>
+
+        <path class="dg-line" d="M190 224 L226 196" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M190 224 L226 252" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M430 196 L466 216" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M430 252 L466 232" marker-end="url(#layers-arrow)"/>
+        <path class="dg-line" d="M670 224 L706 224" marker-end="url(#layers-arrow)"/>
+      </svg>
+    </div>
+    <p class="scroll-hint">Scroll sideways to see the whole diagram.</p>
+    <figcaption>Both directions use callbacks at the core (<code>onValue</code>, <code>onChunk</code>), which allocate nothing per call and map directly onto <code>controller.enqueue</code>.</figcaption>
+  </figure>
+</section>
+
+<section aria-labelledby="chunk-boundaries">
+  <h2 id="chunk-boundaries">Items across chunk boundaries</h2>
+  <p>Most items sit wholly inside a chunk and are decoded in place, exactly like a normal decode. Only the end of a chunk needs care.</p>
+  <figure class="diagram">
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 880 330" role="img" aria-labelledby="chunks-title chunks-description">
+        <title id="chunks-title">Decoding items across two chunks</title>
+        <desc id="chunks-description">Chunk A holds items 1, 2 and 3 and the start of item 4. Items 1 and 2 are decoded in place with read(buffer, offset). In the last SCAN_AHEAD_BYTES of the chunk, each item is first checked with scanItem: item 3 is complete, so it is decoded in place; item 4 needs more bytes, so beginSpanning copies its tail into a new assembly buffer. When chunk B arrives, continueSpanning resumes the saved scan, appends blocks of at least ASSEMBLY_BLOCK bytes from chunk B to the assembly buffer, and once the scan reports the item complete, decodes it once with readWhole. Decoding then resumes in place in chunk B with items 5 and 6.</desc>
+        <defs>
+          <marker id="chunks-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="dg-arrowhead" d="M0 0L10 5L0 10z"/></marker>
+          <marker id="chunks-arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="dg-arrowhead-muted" d="M0 0L10 5L0 10z"/></marker>
+        </defs>
+        <text class="dg-mono" x="245" y="22" text-anchor="middle">push(chunk A, onValue)</text>
+        <text class="dg-mono" x="680" y="22" text-anchor="middle">push(chunk B, onValue)</text>
+
+        <rect class="dg-chunk" x="20" y="32" width="450" height="64" rx="6"/>
+        <rect class="dg-chunk" x="500" y="32" width="360" height="64" rx="6"/>
+        <rect class="dg-scan-zone" x="320" y="32" width="150" height="64"/>
+        <rect class="dg-scan-zone" x="710" y="32" width="150" height="64"/>
+
+        <rect class="dg-item" x="28" y="44" width="106" height="40" rx="4"/><text class="dg-mono" x="81" y="68" text-anchor="middle">item 1</text>
+        <rect class="dg-item" x="138" y="44" width="106" height="40" rx="4"/><text class="dg-mono" x="191" y="68" text-anchor="middle">item 2</text>
+        <rect class="dg-item" x="248" y="44" width="110" height="40" rx="4"/><text class="dg-mono" x="303" y="68" text-anchor="middle">item 3</text>
+        <rect class="dg-item-split" x="362" y="44" width="108" height="40" rx="4"/><text class="dg-mono" x="416" y="68" text-anchor="middle">item 4…</text>
+        <rect class="dg-item-split" x="500" y="44" width="76" height="40" rx="4"/><text class="dg-mono" x="538" y="68" text-anchor="middle">…4</text>
+        <rect class="dg-item" x="580" y="44" width="126" height="40" rx="4"/><text class="dg-mono" x="643" y="68" text-anchor="middle">item 5</text>
+        <rect class="dg-item" x="710" y="44" width="142" height="40" rx="4"/><text class="dg-mono" x="781" y="68" text-anchor="middle">item 6</text>
+
+        <text class="dg-hot-text" x="395" y="112" text-anchor="middle">last SCAN_AHEAD_BYTES</text>
+        <text class="dg-hot-text" x="785" y="112" text-anchor="middle">last SCAN_AHEAD_BYTES</text>
+
+        <text class="dg-label-strong" x="136" y="140" text-anchor="middle">1, 2: decoded in place</text>
+        <text class="dg-mono" x="136" y="156" text-anchor="middle">read(buffer, offset)</text>
+        <text class="dg-label-strong" x="303" y="190" text-anchor="middle">3: scanItem → 0</text>
+        <text class="dg-text" x="303" y="206" text-anchor="middle">complete: read in place</text>
+        <path class="dg-line" d="M303 88 L303 176" marker-end="url(#chunks-arrow)"/>
+
+        <text class="dg-label-strong" x="470" y="140" text-anchor="middle">4: scanItem → needed &gt; 0</text>
+        <text class="dg-mono" x="470" y="156" text-anchor="middle">beginSpanning(chunk, offset)</text>
+
+        <rect class="dg-box-hot" x="330" y="236" width="320" height="64" rx="8"/>
+        <text class="dg-title" x="490" y="258" text-anchor="middle">assembly: Uint8Array</text>
+        <text class="dg-text" x="490" y="276" text-anchor="middle">new per spanning item, grows ×2;</text>
+        <text class="dg-text" x="490" y="291" text-anchor="middle">scan state saved in ScanState</text>
+        <path class="dg-line" d="M416 88 L416 120 M416 164 L416 232" marker-end="url(#chunks-arrow)"/>
+        <path class="dg-line" d="M538 88 L538 120 M538 164 L538 232" marker-end="url(#chunks-arrow)"/>
+        <text class="dg-label-strong" x="684" y="184">next push: continueSpanning</text>
+        <text class="dg-text" x="684" y="202">resumes the saved scan, appends</text>
+        <text class="dg-text" x="684" y="218">blocks of ≥ ASSEMBLY_BLOCK;</text>
+        <text class="dg-text" x="684" y="234">complete → readWhole(assembly)</text>
+        <path class="dg-line-dashed" d="M650 268 L672 268 L672 176" />
+        <text class="dg-label-strong" x="760" y="140" text-anchor="middle">5, 6: in place again</text>
+      </svg>
+    </div>
+    <p class="scroll-hint">Scroll sideways to see the whole diagram.</p>
+    <figcaption>Shaded: the last <code>SCAN_AHEAD_BYTES</code> (1 KiB) of each chunk, where an item's boundary is checked before it is decoded. Orange: an item cut by the chunk's end, gathered into the assembly buffer.</figcaption>
+  </figure>
+  <p>Three constants govern this, each commented with its reason:</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="16-24"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">const DEFAULT_MAX_ITEM_BYTES = 16 * 1024 * 1024;
+/** While assembling an item that spans chunks, copy at least this much of each
+ * new chunk at a time: few copies, and little copied past the item's end. */
+const ASSEMBLY_BLOCK = 4096;
+const NO_BYTES = new Uint8Array(0);
+/** Near the end of a chunk, check an item's boundary with the scanner before
+ * decoding it. A cut-off item is then detected without an exception, whose
+ * stack-trace capture measured ~3.7 µs per chunk boundary. */
+const SCAN_AHEAD_BYTES = 1024;</code></pre></figure>
+</section>
+
+<section aria-labelledby="scanner">
+  <h2 id="scanner">The boundary scanner</h2>
+  <p><code>scanItem</code> walks headers only and skips payloads by their declared length. It decodes nothing, allocates nothing and does not recurse: one counter, <code>itemsPending</code>, tracks how many items the current item still needs (an array adds its length, a map twice its entry count, a tag one). Indefinite-length items push the counter onto a small stack until their break.</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="52-63"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">/** Resumable boundary scan of one item starting at `start` in `bytes`, of
+ * which `[start, end)` is available. Walks headers only, skipping payloads by
+ * their declared length: no decoding, no allocation, no recursion.
+ * `position` may run past `end` while a payload is still arriving. */
+interface ScanState {
+  position: number;
+  /** Items still to be seen at the innermost definite level: an array adds its
+   * length, a map twice its entry count, a tag one. */
+  itemsPending: number;
+  /** For each open indefinite-length item, the itemsPending to restore at its break. */
+  readonly openIndefinite: number[];
+}</code></pre></figure>
+  <p>The scan can stop at any byte and resume later from its saved state, so an item spread over many chunks is scanned once in total. That is what keeps decoding linear in the input whatever the chunking.</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="81-139"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">/** Bytes still needed before the scan can continue, or 0 when the item is
+ * complete (its end is then scan.position). Error offsets are relative to `start`. */
+function scanItem(bytes: Uint8Array, start: number, end: number, scan: ScanState, maxItemBytes: number, limits: ContainerLimits): number {
+  while (scan.itemsPending &gt; 0 || scan.openIndefinite.length &gt; 0) {
+    if (scan.position &gt;= end) return scan.position - end + 1;
+    const headerOffset = scan.position;
+    const token = bytes[headerOffset];
+    const additionalInfo = token &amp; 31;
+    const majorType = token &gt;&gt;&gt; 5;
+    // Directly inside an open indefinite-length item: its children are not counted.
+    const atIndefiniteLevel = scan.itemsPending === 0;
+    if (token === Token.Break) {
+      if (!atIndefiniteLevel) return deferToDecoder(scan, headerOffset);
+      scan.itemsPending = scan.openIndefinite.pop()!;
+      scan.position = headerOffset + 1;
+      continue;
+    }
+    if (additionalInfo === Info.Indefinite) {
+      if (majorType &lt; Major.Bytes || majorType &gt; Major.Map) return deferToDecoder(scan, headerOffset);
+      if (!atIndefiniteLevel) scan.itemsPending--;
+      scan.openIndefinite.push(scan.itemsPending);
+      scan.itemsPending = 0;
+      scan.position = headerOffset + 1;
+    } else {
+      if (additionalInfo &gt; Info.EightBytes) return deferToDecoder(scan, headerOffset); // reserved
+      const headerSize = additionalInfo &lt; 24 ? 1 : 1 + (1 &lt;&lt; (additionalInfo - 24));
+      if (headerOffset + headerSize &gt; end) return headerOffset + headerSize - end;
+      // Integers, simple values and floats are complete with their header;
+      // their values are validated by the decoder, not here.
+      const carriesLength = majorType &gt; Major.Negative &amp;&amp; majorType &lt; Major.Simple;
+      if (carriesLength &amp;&amp; additionalInfo === Info.EightBytes &amp;&amp; readUint32(bytes, headerOffset + 1) &gt; 0x1fffff) {
+        return deferToDecoder(scan, headerOffset); // a length beyond 2^53
+      }
+      scan.position = headerOffset + headerSize;
+      if (!atIndefiniteLevel) scan.itemsPending--;
+      if (carriesLength) {
+        const argument = readArgumentValue(bytes, headerOffset + 1, additionalInfo);
+        if (majorType === Major.Bytes || majorType === Major.Text) {
+          scan.position += argument; // skip the payload
+        } else if (majorType === Major.Array) {
+          // Same limit checks, in the same order, as the decoder: the error does
+          // not depend on where chunk boundaries fall.
+          if (argument &gt; limits.maxArrayLength) fail('array-limit', headerOffset - start, 'Array exceeds maxArrayLength');
+          scan.itemsPending += argument;
+        } else if (majorType === Major.Map) {
+          if (argument &gt; limits.maxMapEntries) fail('map-limit', headerOffset - start, 'Map exceeds maxMapEntries');
+          scan.itemsPending += 2 * argument;
+        } else { // Major.Tag
+          scan.itemsPending += 1; // its content
+        }
+      }
+    }
+    // Every pending item, and every open item's break, needs at least one more byte.
+    if (scan.position - start + scan.itemsPending + scan.openIndefinite.length &gt; maxItemBytes) {
+      fail('item-limit', 0, 'Item exceeds maxItemBytes');
+    }
+  }
+  return scan.position &gt; end ? scan.position - end : 0;
+}</code></pre></figure>
+  <p>Two details keep errors identical however the input is chunked. The scanner checks array and map limits in the same order as the decoder, using the same <code>containerLimits</code>. And for any malformed header it calls <code>deferToDecoder</code>, which ends the item just after the bad header so the decoder reads it and reports its own error.</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="71-79"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">/** A malformed header: end the item just after it, so the decoder reads up to
+ * this point and reports the error itself. The error is then the same
+ * wherever chunk boundaries fall. */
+function deferToDecoder(scan: ScanState, headerOffset: number): number {
+  scan.position = headerOffset + 1;
+  scan.itemsPending = 0;
+  scan.openIndefinite.length = 0;
+  return 0;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="in-chunk">
+  <h2 id="in-chunk">Decoding in place, scanning near the end</h2>
+  <p>Within a chunk the decoder calls the ordinary <code>read</code>. Only in the last <code>SCAN_AHEAD_BYTES</code> does it scan first. If a <code>truncated</code> error still escapes the decode, the scan settles whether the item really was cut off.</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="208-245"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">/** Decode items in place from the chunk. Only the last item can be cut off
+ * by the chunk's end; it then moves to the spanning path. */
+function decodeInChunk(chunk: Uint8Array, offset: number, onValue: (value: Value) =&gt; void): void {
+  const buffer = binary(chunk);
+  while (offset &lt; chunk.length) {
+    if (chunk.length - offset &lt; SCAN_AHEAD_BYTES) {
+      resetScan(scan, offset);
+      let needed: number;
+      try {
+        needed = scanItem(chunk, offset, chunk.length, scan, maxItemBytes, limits);
+      } catch (error) {
+        throw atStreamOffset(error, streamOffset + offset);
+      }
+      if (needed &gt; 0) {
+        beginSpanning(chunk, offset);
+        return;
+      }
+    }
+    let value: Value;
+    let next: number;
+    try {
+      [value, next] = read(buffer, offset, options);
+    } catch (error) {
+      if (!(error instanceof CborError &amp;&amp; error.code === 'truncated')) throw atStreamOffset(error, streamOffset);
+      // Probably cut off by the chunk's end. The scan settles it: either more
+      // bytes are needed, or the item is complete (and decoding it reports
+      // its real error, or it decodes and we carry on after it).
+      beginSpanning(chunk, offset);
+      const resumeAt = continueSpanning(NO_BYTES, onValue);
+      if (assembly !== undefined) return;
+      offset = chunk.length + resumeAt;
+      continue;
+    }
+    if (next - offset &gt; maxItemBytes) fail('item-limit', streamOffset + offset, 'Item exceeds maxItemBytes');
+    offset = next;
+    onValue(value);
+  }
+}</code></pre></figure>
+  <p>BENCHMARK.md explains the scan-ahead: exceptions had cost about 3.7 µs per chunk boundary, almost all of it stack-trace capture. With 1 KiB chunks, 100,000 rows took 55 ms before the change and 35 ms after.</p>
+</section>
+
+<section aria-labelledby="assembly">
+  <h2 id="assembly">The assembly buffer</h2>
+  <p>An item that runs past the end of a chunk is copied into an assembly buffer, a new one for each spanning item, so values that borrow from it stay valid. Each later chunk feeds it in blocks of at least <code>ASSEMBLY_BLOCK</code> bytes until the scan reports the item complete. Then it is decoded once, and normal decoding resumes in the chunk just after the item's end.</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="159-206"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">function append(chunk: Uint8Array, start: number, end: number): void {
+  const needed = filled + end - start;
+  if (assembly === undefined || needed &gt; assembly.length) {
+    const larger = new Uint8Array(Math.max(needed, 2 * (assembly?.length ?? 0), ASSEMBLY_BLOCK));
+    if (assembly !== undefined) larger.set(assembly.subarray(0, filled));
+    assembly = larger;
+  }
+  assembly.set(chunk.subarray(start, end), filled);
+  filled = needed;
+}
+
+/** Start assembling an item that runs past the end of the chunk. */
+function beginSpanning(chunk: Uint8Array, start: number): void {
+  assembly = undefined;
+  filled = 0;
+  itemOffset = streamOffset + start;
+  resetScan(scan, 0);
+  append(chunk, start, chunk.length);
+}
+
+/** Feed the spanning item from `chunk`. Returns where in the chunk normal
+ * decoding resumes (negative if the item ended in bytes appended earlier),
+ * or chunk.length if the item is still incomplete. */
+function continueSpanning(chunk: Uint8Array, onValue: (value: Value) =&gt; void): number {
+  let taken = 0;
+  for (;;) {
+    let needed: number;
+    let value: Value | undefined;
+    try {
+      needed = scanItem(assembly!, 0, filled, scan, maxItemBytes, limits);
+      if (needed === 0) value = readWhole(binary(assembly!.subarray(0, scan.position)), options);
+    } catch (error) {
+      throw atStreamOffset(error, itemOffset);
+    }
+    if (needed === 0) {
+      const itemEnd = scan.position;
+      const resumeAt = taken - (filled - itemEnd); // bytes past the item came from this chunk
+      assembly = undefined;
+      filled = 0;
+      onValue(value!);
+      return resumeAt;
+    }
+    if (taken === chunk.length) return chunk.length;
+    const block = Math.min(chunk.length - taken, Math.max(needed, ASSEMBLY_BLOCK));
+    append(chunk, taken, taken + block);
+    taken += block;
+  }
+}</code></pre></figure>
+  <p>The decoder's public surface is two methods. A decoder that has thrown stays failed, <code>push</code> after <code>end()</code> or from inside its own callback is a <code>TypeError</code>, and errors carry absolute stream offsets.</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="247-275"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">return {
+  push(chunk, onValue) {
+    if (failure !== undefined) throw failure;
+    if (ended) throw new TypeError('push() after end()');
+    if (busy) throw new TypeError('push() called from inside onValue');
+    binary(chunk); // validates the chunk type
+    busy = true;
+    try {
+      const start = assembly !== undefined ? continueSpanning(chunk, onValue) : 0;
+      if (assembly === undefined) decodeInChunk(chunk, start, onValue);
+      streamOffset += chunk.length;
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      busy = false;
+    }
+  },
+  end() {
+    if (failure !== undefined) throw failure;
+    ended = true;
+    if (assembly !== undefined) {
+      failure = new CborError('truncated', itemOffset, 'Stream ended inside a CBOR item');
+      throw failure;
+    }
+  },
+  get bufferedBytes() { return assembly === undefined ? 0 : filled; },
+  get offset() { return streamOffset; },
+};</code></pre></figure>
+  <h3 id="item-limit">Bounded buffering</h3>
+  <p><code>maxItemBytes</code> (default 16 MiB) caps one item's encoded size. For an item still arriving, the scanner checks it from headers, before the bytes arrive, so a short header claiming a 4 GB string can't make the decoder buffer it. The other decode limits (<code>maxDepth</code>, <code>maxArrayLength</code>, <code>maxMapEntries</code> and the allocation budget) apply to each item.</p>
+</section>
+
+<section aria-labelledby="adapters">
+  <h2 id="adapters">The Web Streams adapters</h2>
+  <p><code>decodeStream</code> is a <code>TransformStream</code> around one decoder. With <code>batch: true</code> it emits one array per input chunk instead of one value per step: each Web Streams step costs about 1 µs in Node, more than decoding a small value.</p>
+<figure class="code" data-source="src/stream.ts" data-lines="46-73"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/stream.ts">src/stream.ts</a></figcaption><pre><code class="language-ts">// Batch modes exist because each Web Streams step costs about 1 µs per chunk
+// in Node, more than decoding or encoding a small value. Moving values as
+// arrays pays that cost once per chunk instead of once per value.
+
+/** Bytes in, decoded values out; with `batch: true`, arrays of values out.
+ * Decode errors error the stream. */
+export function decodeStream(options?: DecodeStreamOptions): TransformStream&lt;BufferSource, Value&gt;;
+export function decodeStream(options: BatchDecodeStreamOptions): TransformStream&lt;BufferSource, Value[]&gt;;
+export function decodeStream(options: DecodeStreamOptions | BatchDecodeStreamOptions = {}): TransformStream&lt;BufferSource, Value | Value[]&gt; {
+  const decoder = createSequenceDecoder(options);
+  const strategies = [options.writableStrategy, options.readableStrategy as QueuingStrategy&lt;Value | Value[]&gt;] as const;
+  if (options.batch) {
+    return new TransformStream&lt;BufferSource, Value[]&gt;({
+      transform(chunk, controller) {
+        const values: Value[] = [];
+        decoder.push(asBytes(chunk), value =&gt; { values.push(value); });
+        if (values.length &gt; 0) controller.enqueue(values);
+      },
+      flush() { decoder.end(); },
+    }, ...strategies);
+  }
+  let enqueue: (value: Value) =&gt; void;
+  return new TransformStream&lt;BufferSource, Value&gt;({
+    start(controller) { enqueue = value =&gt; controller.enqueue(value); },
+    transform(chunk) { decoder.push(asBytes(chunk), enqueue); },
+    flush() { decoder.end(); },
+  }, ...strategies);
+}</code></pre></figure>
+  <p><code>decodeSequence</code> is an async generator over a <code>ReadableStream</code> or any iterable of chunks. Stopping early cancels the source.</p>
+<figure class="code" data-source="src/stream.ts" data-lines="123-147"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/stream.ts">src/stream.ts</a></figcaption><pre><code class="language-ts">/** Decode a CBOR sequence from a byte stream or any (async) iterable of byte
+ * chunks, such as fetch's response.body or a Node Readable. Stopping early
+ * (break, return or throw in for await) cancels the source. */
+export async function* decodeSequence(source: ByteSource, options: SequenceDecodeOptions = {}): AsyncGenerator&lt;Value, void, undefined&gt; {
+  const decoder = createSequenceDecoder(options);
+  const decoded: Value[] = [];
+  const collect = (value: Value): void =&gt; { decoded.push(value); };
+  const iterator: AsyncIterator&lt;BufferSource&gt; | Iterator&lt;BufferSource&gt; = isReadableStream(source)
+    ? readerIterator(source)
+    : Symbol.asyncIterator in source ? source[Symbol.asyncIterator]() : source[Symbol.iterator]();
+  let finished = false;
+  try {
+    for (;;) {
+      const step = await iterator.next();
+      if (step.done) break;
+      decoder.push(asBytes(step.value), collect);
+      for (let index = 0; index &lt; decoded.length; index++) yield decoded[index];
+      decoded.length = 0;
+    }
+    finished = true;
+    decoder.end();
+  } finally {
+    if (!finished) await iterator.return?.();
+  }
+}</code></pre></figure>
+  <h3 id="encoding-sequences">Encoding sequences</h3>
+  <p>The encoder has two modes. With <code>chunkBytes: 0</code> (the default) each value becomes its own owned chunk, for the lowest latency. With <code>chunkBytes: N</code> values are written straight into a growable chunk, which is emitted once it holds at least N bytes. An unsupported value throws and leaves no partial bytes behind.</p>
+<figure class="code" data-source="src/sequence.ts" data-lines="293-325"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">src/sequence.ts</a></figcaption><pre><code class="language-ts">export function createSequenceEncoder(options: SequenceEncodeOptions = {}): SequenceEncoder {
+  const chunkBytes = options.chunkBytes ?? 0;
+  if (!Number.isSafeInteger(chunkBytes) || chunkBytes &lt; 0) throw new RangeError('Invalid chunkBytes');
+  if (chunkBytes === 0) {
+    return { push: (value, onChunk) =&gt; onChunk(encode(value, options)), flush: () =&gt; {} };
+  }
+  // Each emitted chunk is a fresh buffer that is never written again. It starts
+  // at up to 64 KiB and grows as values arrive, so a large chunkBytes does not
+  // allocate its full size up front.
+  const initialBytes = Math.min(chunkBytes, 65536);
+  const writeValue = writerFor(profileOf(options));
+  let writer: Writer = createWriter(new Uint8Array(initialBytes), 0, true);
+  const emit = (onChunk: (chunk: Uint8Array) =&gt; void): void =&gt; {
+    const chunk = writer.bytes.subarray(0, writer.position);
+    writer = createWriter(new Uint8Array(initialBytes), 0, true);
+    onChunk(chunk);
+  };
+  return {
+    push(value, onChunk) {
+      const start = writer.position;
+      try {
+        writeValue(writer, value, 0);
+      } catch (error) {
+        writer.position = start; // an unsupported value leaves no partial bytes
+        throw error;
+      }
+      if (writer.position &gt;= chunkBytes) emit(onChunk);
+    },
+    flush(onChunk) {
+      if (writer.position &gt; 0) emit(onChunk);
+    },
+  };
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="streaming-numbers">
+  <h2 id="streaming-numbers">Measured</h2>
+  <p>From BENCHMARK.md (<code>npm run bench:stream</code>): each variant in its own process, median of 7 runs, 100,000 object rows (6.4 MB) as a CBOR sequence. Fresh chunk buffers are sliced inside the timed region for every variant. cbor-x is compared through its Node-stream <code>DecoderStream</code> and <code>EncoderStream</code>; cborg has no streaming API.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Variant</th><th scope="col" class="number">64 KiB chunks</th><th scope="col" class="number">1 KiB chunks</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">pure-cbor sequence decoder</th><td class="number ahead">23.5 ms</td><td class="number ahead">38.1 ms</td></tr>
+        <tr><th scope="row">pure-cbor <code>decodeStream({ batch: true })</code></th><td class="number">25.3 ms</td><td class="number">46.9 ms</td></tr>
+        <tr><th scope="row">pure-cbor <code>decodeSequence</code></th><td class="number">33.3 ms</td><td class="number">48.8 ms</td></tr>
+        <tr><th scope="row">pure-cbor <code>decodeStream()</code>, one value per step</th><td class="number">49.1 ms</td><td class="number">68.1 ms</td></tr>
+        <tr><th scope="row">cbor-x <code>DecoderStream</code></th><td class="number">37.0 ms</td><td class="number">91.5 ms</td></tr>
+      </tbody>
+      <caption>Decoding 100,000 rows. Lower is better.</caption>
+    </table>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Variant</th><th scope="col" class="number">Time</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">pure-cbor <code>encodeStream({ batch: true })</code>, batches of 1,000, <code>chunkBytes: 0</code></th><td class="number ahead">19.5 ms</td></tr>
+        <tr><th scope="row">pure-cbor sequence encoder, <code>chunkBytes: 16384</code></th><td class="number">21.7 ms</td></tr>
+        <tr><th scope="row">pure-cbor sequence encoder, <code>chunkBytes: 0</code></th><td class="number">24.2 ms</td></tr>
+        <tr><th scope="row">pure-cbor <code>encodeStream()</code>, <code>chunkBytes: 0</code>, one value per step</th><td class="number behind">125.8 ms</td></tr>
+        <tr><th scope="row">cbor-x <code>EncoderStream</code></th><td class="number">66.2 ms</td></tr>
+      </tbody>
+      <caption>Encoding 100,000 rows. Lower is better.</caption>
+    </table>
+  </div>
+  <ul>
+    <li>The incremental core is faster than cbor-x's streams in every case: 1.6× with 64 KiB chunks, 2.4× with 1 KiB chunks, 1.4× for a single large item, and 2.7–3.1× when encoding.</li>
+    <li>Batched <code>decodeStream</code> is within 8% of the core decoder at 64 KiB chunks, and batched <code>encodeStream</code> is 3.4× faster than cbor-x's <code>EncoderStream</code>.</li>
+    <li>Web Streams with one value per step cost about 1 µs per value in Node: a do-nothing <code>TransformStream</code> passing 100,000 values took about 100 ms by itself. For many small values, use batch mode, <code>decodeSequence</code> or the core.</li>
+    <li>A 7.8 MB item spanning 16 KiB chunks costs about 20–25% more than decoding it whole (one copy into the assembly buffer plus a header scan).</li>
+  </ul>
+</section>
+
+    <nav class="pager" aria-label="Previous and next page"><a class="pager-previous" href="decode.html"><span class="pager-direction">Previous</span><span class="pager-title">Decode</span></a><a class="pager-next" href="performance.html"><span class="pager-direction">Next</span><span class="pager-title">Performance</span></a></nav>
+  </main>
+  <aside class="toc-aside" aria-label="On this page"><p class="toc-title">On this page</p><div data-toc></div></aside>
+</div>
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p>pure-cbor is MIT licensed. Code excerpts are copied from <a href="https://github.com/davidgtonge/pure-cbor/tree/main/src">src/</a>; numbers come from <a href="https://github.com/davidgtonge/pure-cbor/blob/main/BENCHMARK.md">BENCHMARK.md</a> and <a href="https://github.com/davidgtonge/pure-cbor/blob/main/README.md">README.md</a>.</p>
+    <p><a href="https://www.npmjs.com/package/pure-cbor">npm</a> · <a href="https://github.com/davidgtonge/pure-cbor">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>

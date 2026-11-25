@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance notes · pure-cbor</title>
+<meta name="description" content="Why each of pure-cbor&#x27;s performance choices exists, with the measured effect recorded in its README and BENCHMARK.md, and the full benchmark tables including where it is not ahead.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%231f55b8'/%3E%3Crect x='7' y='9' width='5' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='14' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='19' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='24' y='9' width='2' height='14' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect class="brand-mark-frame" x="1" y="1" width="30" height="30" rx="8"/><rect class="brand-mark-bits" x="7" y="9" width="5" height="14" rx="1.5"/><rect class="brand-mark-bits" x="14" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="19" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="24" y="9" width="2" height="14" rx="1" opacity=".75"/></svg><span>pure-cbor</span></a>
+    <nav class="site-nav" aria-label="Site">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="principles.html">Principles</a></li>
+        <li><a href="encode.html">Encode</a></li>
+        <li><a href="decode.html">Decode</a></li>
+        <li><a href="streaming.html">Streaming</a></li>
+        <li><a href="performance.html" aria-current="page">Performance</a></li>
+        <li><a href="correctness.html">Correctness</a></li>
+        <li><a href="modules.html">Module map</a></li>
+      </ul>
+    </nav>
+    <a class="header-github" href="https://github.com/davidgtonge/pure-cbor"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+  </div>
+</header>
+<div class="page">
+  <main id="content" class="article">
+<header class="page-intro">
+  <p class="eyebrow">The tour · 5 of 7</p>
+  <h1>Performance notes</h1>
+  <p class="lede">The README says each performance choice was measured, and the reasons are also commented in the code. This page collects them: what the trick is, why it exists, and the effect the docs record. All numbers are Node 22 on macOS arm64; browser and workerd performance are not yet measured.</p>
+</header>
+<details class="toc-mobile"><summary>On this page</summary><div data-toc></div></details>
+
+<section aria-labelledby="heap">
+  <h2 id="heap">On-heap and off-heap typed arrays</h2>
+  <p>Most of the design follows from one property of V8 that the docs describe: a small, freshly allocated typed array lives on the JavaScript heap and is cheap, but a typed array over 64 bytes, or a small one whose <code>.buffer</code> is touched, needs a separate off-heap backing store. BENCHMARK.md puts that at about 0.5 µs. For small messages that costs more than the encoding or decoding itself.</p>
+  <p>So the library avoids touching <code>.buffer</code> on small arrays, and counts allocations:</p>
+  <ul>
+    <li><strong>Owned encoding</strong> writes into a reused staging buffer and copies out exactly once: one output allocation and no sizing pass (<a href="encode.html#staging">encode, step 2</a>).</li>
+    <li><strong>Small owned outputs</strong> (numbers, simple values) are allocated at their exact size and never touch <code>.buffer</code>, so they stay on-heap.</li>
+    <li><strong>The slab encoder</strong> exists for larger messages: outputs of 64 bytes or less are already cheap on-heap allocations, so a slab mainly saves the off-heap allocation above that size.</li>
+    <li><strong>Byte strings over 64 bytes</strong> from one decode share an arena (<a href="decode.html#arena">decode, step 9</a>).</li>
+  </ul>
+</section>
+
+<section aria-labelledby="no-dataview">
+  <h2 id="no-dataview">No DataView for scalars</h2>
+  <p>A DataView is the usual way to read big-endian numbers, but constructing one on a fresh small buffer forces that buffer off-heap. The README measured the cost at about 900 ns per message, more than the encode or decode itself. pure-cbor reads and writes headers and integers byte by byte, and converts floats through a one-element scratch array:</p>
+<figure class="code" data-source="src/number.ts" data-lines="5-12,143-154"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/number.ts">src/number.ts</a></figcaption><pre><code class="language-ts">// Float conversion scratch, used synchronously within one call (no user code
+// runs in between), so it carries no state across operations. It replaces
+// DataView, whose construction is expensive on fresh small buffers.
+const float64 = new Float64Array(1);
+const float64Bytes = new Uint8Array(float64.buffer);
+const float32 = new Float32Array(1);
+const float32Bytes = new Uint8Array(float32.buffer);
+const float32Bits = new Uint32Array(float32.buffer);
+// …
+/** Big-endian binary64 at offset; caller has checked 8 readable bytes. */
+export function readFloat64(bytes: Uint8Array, offset: number): number {
+  const target = float64Bytes;
+  if (LITTLE_ENDIAN) {
+    target[0] = bytes[offset + 7]; target[1] = bytes[offset + 6]; target[2] = bytes[offset + 5]; target[3] = bytes[offset + 4];
+    target[4] = bytes[offset + 3]; target[5] = bytes[offset + 2]; target[6] = bytes[offset + 1]; target[7] = bytes[offset];
+  } else {
+    target[0] = bytes[offset]; target[1] = bytes[offset + 1]; target[2] = bytes[offset + 2]; target[3] = bytes[offset + 3];
+    target[4] = bytes[offset + 4]; target[5] = bytes[offset + 5]; target[6] = bytes[offset + 6]; target[7] = bytes[offset + 7];
+  }
+  return float64[0];
+}</code></pre></figure>
+  <p>The effect shows most on fresh input, where every message is a new buffer. From BENCHMARK.md, decoding from a fresh buffer:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Workload</th><th scope="col" class="number">pure-cbor</th><th scope="col" class="number">cbor-x</th><th scope="col" class="number">cborg</th><th scope="col" class="number">vs best other</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">uint small †</th><td class="number">34 ns</td><td class="number">455 ns</td><td class="number">426 ns</td><td class="number ahead">12.60×</td></tr>
+        <tr><th scope="row">float64 †</th><td class="number">38 ns</td><td class="number">504 ns</td><td class="number">465 ns</td><td class="number ahead">12.15×</td></tr>
+        <tr><th scope="row">ASCII 32</th><td class="number">81 ns</td><td class="number">447 ns</td><td class="number">418 ns</td><td class="number ahead">5.19×</td></tr>
+        <tr><th scope="row">object: row</th><td class="number">236 ns</td><td class="number">567 ns</td><td class="number">820 ns</td><td class="number ahead">2.40×</td></tr>
+      </tbody>
+      <caption>Selected rows from “Decode (fresh input)”. The README summarises small fresh messages as 5–12× faster. † See the note under the <a href="#table-decode-fresh">full tables</a>.</caption>
+    </table>
+  </div>
+  <p>Floats in arrays are the exception, handled deliberately. An input over 64 bytes is already off-heap, so the array decoder builds one DataView, lazily, on the first float64 element, and shares it for the rest of the decode:</p>
+<figure class="code" data-source="src/array.ts" data-lines="75-88"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/array.ts">src/array.ts</a></figcaption><pre><code class="language-ts">if (token === Token.Float64) {
+  readable(bytes, position, 8);
+  // DataView.getFloat64 is an intrinsic and the fastest path, but building
+  // a DataView over a small on-heap buffer is costly. Inputs over 64 bytes
+  // are already off-heap, so one view is shared by the whole decode.
+  if (state.floatView === undefined &amp;&amp; bytes.length &gt; 64) {
+    state.floatView = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+  }
+  values[index] = state.floatView !== undefined
+    ? state.floatView.getFloat64(position)
+    : NumberCodec.readFloat64(bytes, position);
+  position += 8;
+  continue;
+}</code></pre></figure>
+  <p>Encoding float64 uses an unrolled byte copy, because a loop measured slower:</p>
+<figure class="code" data-source="src/number.ts" data-lines="98-111"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/number.ts">src/number.ts</a></figcaption><pre><code class="language-ts">// Unrolled: a byte loop here was ~1.6x slower in array benchmarks.
+function writeFloat64(bytes: Uint8Array, offset: number, value: number): number {
+  float64[0] = value;
+  const source = float64Bytes;
+  bytes[offset] = 0xfb;
+  if (LITTLE_ENDIAN) {
+    bytes[offset + 1] = source[7]; bytes[offset + 2] = source[6]; bytes[offset + 3] = source[5]; bytes[offset + 4] = source[4];
+    bytes[offset + 5] = source[3]; bytes[offset + 6] = source[2]; bytes[offset + 7] = source[1]; bytes[offset + 8] = source[0];
+  } else {
+    bytes[offset + 1] = source[0]; bytes[offset + 2] = source[1]; bytes[offset + 3] = source[2]; bytes[offset + 4] = source[3];
+    bytes[offset + 5] = source[4]; bytes[offset + 6] = source[5]; bytes[offset + 7] = source[6]; bytes[offset + 8] = source[7];
+  }
+  return offset + 9;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="inlining">
+  <h2 id="inlining">Shaping code for the inliner</h2>
+  <p>Several functions are spelled out where a shared helper would read better, because V8 declined to inline the helper into a hot loop:</p>
+  <ul>
+    <li><strong>Array and map loops</strong> keep the cursor in a local variable and write scalars inline. A shared helper measured 10–20% slower (README).</li>
+    <li><strong>The object decode loop</strong> stays inside <code>MapCodec.read</code>. Moving it one call deeper made small-object decoding bimodal (<a href="principles.html#measured-performance">principles, 6</a>).</li>
+    <li><strong>Number writing</strong> has separate <code>write</code> and <code>writeShortest</code> functions, so the default stays small (<a href="principles.html#options-choose-functions">principles, 2</a>).</li>
+    <li><strong>Text decoding</strong> keeps <code>readPayload</code> small and moves the native decoder into <code>decodeNative</code>.</li>
+  </ul>
+  <p>Wire constants are <code>const enum</code>s for the same reason. The comment in <code>header.ts</code> records the alternative it replaced:</p>
+<figure class="code" data-source="src/header.ts" data-lines="9-11"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/header.ts">src/header.ts</a></figcaption><pre><code class="language-ts">// Named wire constants. Const enums: the compiler substitutes each value at
+// its use site, so hot loops compare against literals. (Imported `const`
+// bindings measured ~15% slower in the array decoder.)</code></pre></figure>
+</section>
+
+<section aria-labelledby="objects">
+  <h2 id="objects">Objects: enumeration, duplicates, keys</h2>
+  <h3 id="for-in">Allocation-free enumeration</h3>
+  <p>Object keys are read with <code>for…in</code>, which goes through V8's enum cache with no allocations: about 3× faster than <code>Object.keys</code> plus <code>Object.values</code> (README). An own-property check is added only if <code>Object.prototype</code> has gained enumerable properties, so a polluted prototype never leaks keys.</p>
+<figure class="code" data-source="src/map.ts" data-lines="35-55"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** Own enumerable string keys in Object.keys order; undefined values omitted.
+ *
+ * Enumeration: `for...in` reads properties through V8's enum cache with no
+ * array allocations, ~3x faster than Object.keys + Object.values. For plain
+ * objects it can only add inherited keys if Object.prototype itself has been
+ * given enumerable properties, so the own-property check runs only then. */
+export function measureObject(object: ValueObject, upper: boolean, depth: number, measureValue: MeasureValue, shortestFloats: boolean): number {
+  const checkOwn = objectPrototypeHasEnumerableKeys();
+  let entryCount = 0;
+  let total = 0;
+  for (const key in object) {
+    if (checkOwn &amp;&amp; !Object.hasOwn(object, key)) continue;
+    const value = object[key];
+    if (value === undefined) continue;
+    entryCount++;
+    total += (upper ? StringCodec.maxSize(key) : StringCodec.size(key)) + measureValue(value, upper, depth, shortestFloats);
+  }
+  total += argumentSize(entryCount);
+  if (!Number.isSafeInteger(total)) fail('invalid-length', 0, 'Encoded map size exceeds safe integer range');
+  return total;
+}</code></pre></figure>
+  <h3 id="duplicate-count">Counting instead of checking</h3>
+  <p>Duplicate keys are detected by comparing the object's key count with the entry count once per map, about 4× cheaper than checking each key (README). The cost is precision: the <code>duplicate-key</code> error points at the map header, not the repeated key.</p>
+  <h3 id="key-cache">The decoded-key cache</h3>
+  <p>A new key string has to be internalized by V8 each time it becomes a property name. A 1,024-slot cache returns the same string for repeated keys of up to 32 bytes (<a href="decode.html#key-cache">decode, step 7</a>). Its comment records the effect:</p>
+<figure class="code" data-source="src/keys.ts" data-lines="1-6"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/keys.ts">src/keys.ts</a></figcaption><pre><code class="language-ts">/** Decoded map keys, reused across messages. A repeated key skips UTF-8
+ * decoding and, more importantly, V8 internalizing a brand-new string each
+ * time it becomes a property name: object construction measured ~2.3x faster
+ * with cached keys. Hits are confirmed byte for byte, so a hash collision only
+ * costs a miss. Only keys that decoded as valid UTF-8 are stored, so a hit is
+ * correct in every decode mode. Holds key text only, never values. */</code></pre></figure>
+  <p>Together with the single-pass, back-patched map writer and small integers decoded inline, these are what BENCHMARK.md credits for the object results: one row decodes in 210 ns against cbor-x's 301 ns, and 100 rows in 21.1 µs against 29.1 µs (reused input).</p>
+</section>
+
+<section aria-labelledby="arrays-and-text">
+  <h2 id="arrays-and-text">Arrays and short text</h2>
+  <p><strong>Array decode preallocates the result</strong>, measured 1.6× faster than <code>push</code>; holey arrays had no measurable cost for consumers. Scalars are decoded inline with no per-element tuples.</p>
+  <p><strong>Short ASCII text</strong> (up to 32 bytes) is checked 8 bytes at a time, and the tail is built by a single exact-arity <code>fromCharCode</code> call. Short non-ASCII text uses a strict JavaScript UTF-8 decoder that defers to <code>TextDecoder</code> on anything malformed. On reused input, ASCII 32 decodes in 53 ns against cbor-x's 119 ns.</p>
+<figure class="code" data-source="src/string.ts" data-lines="6-15"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">const encoder = new TextEncoder();
+// ignoreBOM: true preserves an initial U+FEFF as part of the CBOR string.
+const strictDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+const lenientDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
+const fromCharCode = String.fromCharCode;
+
+// Below this many UTF-16 units, a JS loop beats TextEncoder.encodeInto's call overhead.
+const SHORT_ENCODE = 64;
+// Up to this many bytes, JS decoding beats TextDecoder's call overhead (~60 ns).
+const SHORT_DECODE = 32;</code></pre></figure>
+  <p>Long text is where this stops helping. At 4096 bytes both libraries hand the work to <code>TextDecoder</code>, and pure-cbor's strict decoder is about 0.9× cbor-x's replacing one on a reused buffer.</p>
+</section>
+
+<section aria-labelledby="bytes">
+  <h2 id="bytes">Byte strings and typed arrays</h2>
+  <p>Typed arrays are copied with one bulk <code>Uint8Array.set</code>; overlapping source and destination views are supported. A 1 MiB <code>Float64Array</code> encodes in 51.9 µs against cbor-x's 119.6 µs, and decodes in 51.1 µs against 116.6 µs.</p>
+  <p>Byte strings are where the default copy policy costs the most. COSE and WebAuthn messages are mostly byte strings, and each copy over 64 bytes is a separate allocation. Version 0.6.0 added the per-decode arena and inline <code>Map</code> and byte-string encode paths. BENCHMARK.md measured the change in one process against 0.5.0:</p>
+<div class="table-wrap"><table><thead><tr><th scope="col"></th><th scope="col" class="number">0.5.0</th><th scope="col" class="number">0.6.0</th></tr></thead><tbody><tr><th scope="row">WebAuthn, 15 attestations, decode (default <code>copy</code>)</th><td class="number">35–47 µs</td><td class="number"><strong>18–21 µs</strong></td></tr><tr><th scope="row">— with <code>copy-separate</code> (0.5.0's behaviour)</th><td class="number">—</td><td class="number">35–47 µs</td></tr><tr><th scope="row">— with <code>borrow</code></th><td class="number">8–11 µs</td><td class="number">8–11 µs</td></tr><tr><th scope="row">COSE_Key encode (cbor-x: 1,114 ns)</th><td class="number">1,241 ns</td><td class="number"><strong>1,029 ns</strong></td></tr><tr><th scope="row"><code>Sig_structure</code> encode (cbor-x: 1,151 ns)</th><td class="number">628 ns</td><td class="number"><strong>430 ns</strong></td></tr></tbody><caption>What 0.6.0 changed, measured in one process against 0.5.0 with alternating bursts.</caption></table></div>
+
+  <p>Borrow mode (<code>binaryOwnership: 'borrow'</code>) returns views into the input, as cbor-x does by default. It is the fastest, and safe while the input stays unchanged, which is the normal case when verifying a message.</p>
+</section>
+
+<section aria-labelledby="streams">
+  <h2 id="streams">Streams</h2>
+  <ul>
+    <li><strong>Scan ahead near chunk ends.</strong> An exception at every chunk boundary cost about 3.7 µs, mostly stack-trace capture. Checking the boundary with the scanner first took 1 KiB chunks from 55 ms to 35 ms per 100,000 rows (<a href="streaming.html#in-chunk">streaming</a>).</li>
+    <li><strong>Batch mode.</strong> Each Web Streams step costs about 1 µs in Node. Moving values as one array per chunk makes batched <code>decodeStream</code> within 8% of the core decoder.</li>
+    <li><strong>Lazy sources.</strong> Enqueuing many items into a <code>ReadableStream</code> up front made Node's stream queue quadratic: 100,000 items took 2.7 s to read back. The README advises building sources that pull lazily, and <code>encodeSequence</code> does.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="full-tables">
+  <h2 id="full-tables">The full tables</h2>
+  <p>These are BENCHMARK.md's main tables, rendered unchanged. They were measured on pure-cbor 0.5.0 (0.6.0 changed only byte-string copying and <code>Map</code>/byte-string encoding), Node v22.19.0 on macOS arm64, with the machine otherwise idle. cbor-x runs as pure JavaScript in standard CBOR mode; cborg uses its defaults, which sort map keys and write floats at their smallest exact width, extra work pure-cbor and cbor-x don't do. Each workload runs in its own process, median of 5 × 80 ms rounds.</p>
+  <div class="callout honest">
+    <p class="callout-title">Read with the noise in mind</p>
+    <p>A run is one sample. Across repeated runs, workloads near 1.0× moved by about ±10%: for example, mixed[] 128 encode ranged from 0.85× to 1.16× against cbor-x. Treat anything within about ±10% of 1.0 as level. Ratios below 1.0 are marked in orange.</p>
+  </div>
+  <h3 id="table-encode">Encode (owned output)</h3>
+<div class="table-wrap"><table><thead><tr><th scope="col">Workload</th><th scope="col" class="number">pure-cbor</th><th scope="col" class="number">cbor-x</th><th scope="col" class="number">cborg</th><th scope="col" class="number">vs best other</th></tr></thead><tbody><tr><th scope="row">uint small †</th><td class="number">25 ns</td><td class="number">109 ns</td><td class="number">80 ns</td><td class="number ahead">3.26×</td></tr><tr><th scope="row">mixed integers</th><td class="number">29 ns</td><td class="number">120 ns</td><td class="number">94 ns</td><td class="number ahead">3.29×</td></tr><tr><th scope="row">timestamp †</th><td class="number">30 ns</td><td class="number">114 ns</td><td class="number">135 ns</td><td class="number ahead">3.84×</td></tr><tr><th scope="row">float64 †</th><td class="number">26 ns</td><td class="number">113 ns</td><td class="number">252 ns</td><td class="number ahead">4.28×</td></tr><tr><th scope="row">boolean/null †</th><td class="number">19 ns</td><td class="number">116 ns</td><td class="number">84 ns</td><td class="number ahead">4.54×</td></tr><tr><th scope="row">ASCII 8</th><td class="number">55 ns</td><td class="number">137 ns</td><td class="number">106 ns</td><td class="number ahead">1.92×</td></tr><tr><th scope="row">ASCII 32</th><td class="number">114 ns</td><td class="number">179 ns</td><td class="number">152 ns</td><td class="number ahead">1.34×</td></tr><tr><th scope="row">ASCII 64</th><td class="number">424 ns</td><td class="number">448 ns</td><td class="number">388 ns</td><td class="number behind">0.92×</td></tr><tr><th scope="row">Unicode 32</th><td class="number">391 ns</td><td class="number">442 ns</td><td class="number">456 ns</td><td class="number ahead">1.13×</td></tr><tr><th scope="row">ASCII 4096</th><td class="number">660 ns</td><td class="number">913 ns</td><td class="number">1314 ns</td><td class="number ahead">1.38×</td></tr><tr><th scope="row">number[] 128</th><td class="number">556 ns</td><td class="number">899 ns</td><td class="number">1418 ns</td><td class="number ahead">1.61×</td></tr><tr><th scope="row">string[] 128 †</th><td class="number">2388 ns</td><td class="number">2715 ns</td><td class="number">3487 ns</td><td class="number ahead">1.14×</td></tr><tr><th scope="row">mixed[] 128</th><td class="number">1050 ns</td><td class="number">1201 ns</td><td class="number">1636 ns</td><td class="number ahead">1.14×</td></tr><tr><th scope="row">number[] 10000</th><td class="number">43.9 µs</td><td class="number">55.2 µs</td><td class="number">121.2 µs</td><td class="number ahead">1.26×</td></tr><tr><th scope="row">Float64Array 1 KiB</th><td class="number">392 ns</td><td class="number">844 ns</td><td class="number">–</td><td class="number ahead">2.15×</td></tr><tr><th scope="row">Float64Array 1 MiB</th><td class="number">51.9 µs</td><td class="number">119.6 µs</td><td class="number">–</td><td class="number ahead">2.30×</td></tr><tr><th scope="row">object: row</th><td class="number">208 ns</td><td class="number">291 ns</td><td class="number">497 ns</td><td class="number ahead">1.40×</td></tr><tr><th scope="row">object: 100 rows</th><td class="number">18.2 µs</td><td class="number">18.9 µs</td><td class="number">43.8 µs</td><td class="number">1.04×</td></tr><tr><th scope="row">object: nested config</th><td class="number">1453 ns</td><td class="number">1269 ns</td><td class="number">2448 ns</td><td class="number behind">0.87×</td></tr><tr><th scope="row">corpus: cbor-x example4</th><td class="number">16.7 µs</td><td class="number">17.3 µs</td><td class="number">50.0 µs</td><td class="number">1.04×</td></tr><tr><th scope="row">corpus: msgpack sample-large</th><td class="number">12.0 µs</td><td class="number">14.8 µs</td><td class="number">21.2 µs</td><td class="number ahead">1.24×</td></tr><tr><th scope="row">corpus: bluesky records 100</th><td class="number">47.3 µs</td><td class="number">56.5 µs</td><td class="number">66.7 µs</td><td class="number ahead">1.20×</td></tr><tr><th scope="row">corpus: float mesh 1000</th><td class="number">214.8 µs</td><td class="number">228.7 µs</td><td class="number">2306.8 µs</td><td class="number">1.06×</td></tr><tr><th scope="row">corpus: float[] 10000</th><td class="number">74.3 µs</td><td class="number">111.5 µs</td><td class="number">1566.1 µs</td><td class="number ahead">1.50×</td></tr></tbody><caption>Encode, owned output. Times per operation; lower is better. “vs best other” above 1 means pure-cbor is faster. † See the note below.</caption></table></div>
+
+  <h3 id="table-decode-reused">Decode (reused input)</h3>
+<div class="table-wrap"><table><thead><tr><th scope="col">Workload</th><th scope="col" class="number">pure-cbor</th><th scope="col" class="number">cbor-x</th><th scope="col" class="number">cborg</th><th scope="col" class="number">vs best other</th></tr></thead><tbody><tr><th scope="row">uint small †</th><td class="number">10 ns</td><td class="number">22 ns</td><td class="number">73 ns</td><td class="number ahead">2.14×</td></tr><tr><th scope="row">mixed integers</th><td class="number">16 ns</td><td class="number">24 ns</td><td class="number">157 ns</td><td class="number ahead">1.50×</td></tr><tr><th scope="row">timestamp †</th><td class="number">15 ns</td><td class="number">24 ns</td><td class="number">104 ns</td><td class="number ahead">1.59×</td></tr><tr><th scope="row">float64 †</th><td class="number">15 ns</td><td class="number">24 ns</td><td class="number">114 ns</td><td class="number ahead">1.58×</td></tr><tr><th scope="row">boolean/null †</th><td class="number">13 ns</td><td class="number">24 ns</td><td class="number">80 ns</td><td class="number ahead">1.88×</td></tr><tr><th scope="row">ASCII 8</th><td class="number">24 ns</td><td class="number">35 ns</td><td class="number">137 ns</td><td class="number ahead">1.49×</td></tr><tr><th scope="row">ASCII 32</th><td class="number">53 ns</td><td class="number">119 ns</td><td class="number">137 ns</td><td class="number ahead">2.23×</td></tr><tr><th scope="row">ASCII 64</th><td class="number">75 ns</td><td class="number">223 ns</td><td class="number">159 ns</td><td class="number ahead">2.10×</td></tr><tr><th scope="row">Unicode 32</th><td class="number">247 ns</td><td class="number">245 ns</td><td class="number">329 ns</td><td class="number behind">0.99×</td></tr><tr><th scope="row">ASCII 4096</th><td class="number">366 ns</td><td class="number">343 ns</td><td class="number">391 ns</td><td class="number behind">0.94×</td></tr><tr><th scope="row">number[] 128</th><td class="number">451 ns</td><td class="number">566 ns</td><td class="number">1761 ns</td><td class="number ahead">1.25×</td></tr><tr><th scope="row">string[] 128 †</th><td class="number">2316 ns</td><td class="number">2187 ns</td><td class="number">5191 ns</td><td class="number behind">0.94×</td></tr><tr><th scope="row">mixed[] 128</th><td class="number">951 ns</td><td class="number">904 ns</td><td class="number">1840 ns</td><td class="number behind">0.95×</td></tr><tr><th scope="row">number[] 10000</th><td class="number">45.9 µs</td><td class="number">47.3 µs</td><td class="number">145.0 µs</td><td class="number">1.03×</td></tr><tr><th scope="row">Float64Array 1 KiB</th><td class="number">410 ns</td><td class="number">735 ns</td><td class="number">–</td><td class="number ahead">1.79×</td></tr><tr><th scope="row">Float64Array 1 MiB</th><td class="number">51.1 µs</td><td class="number">116.6 µs</td><td class="number">–</td><td class="number ahead">2.28×</td></tr><tr><th scope="row">object: row</th><td class="number">210 ns</td><td class="number">301 ns</td><td class="number">614 ns</td><td class="number ahead">1.44×</td></tr><tr><th scope="row">object: 100 rows</th><td class="number">21.1 µs</td><td class="number">29.1 µs</td><td class="number">50.5 µs</td><td class="number ahead">1.38×</td></tr><tr><th scope="row">object: nested config</th><td class="number">1259 ns</td><td class="number">1309 ns</td><td class="number">3313 ns</td><td class="number">1.04×</td></tr><tr><th scope="row">corpus: cbor-x example4</th><td class="number">19.4 µs</td><td class="number">22.4 µs</td><td class="number">40.4 µs</td><td class="number ahead">1.16×</td></tr><tr><th scope="row">corpus: msgpack sample-large</th><td class="number">12.0 µs</td><td class="number">20.5 µs</td><td class="number">27.8 µs</td><td class="number ahead">1.71×</td></tr><tr><th scope="row">corpus: bluesky records 100</th><td class="number">46.6 µs</td><td class="number">71.2 µs</td><td class="number">86.2 µs</td><td class="number ahead">1.53×</td></tr><tr><th scope="row">corpus: float mesh 1000</th><td class="number">183.7 µs</td><td class="number">301.3 µs</td><td class="number">845.3 µs</td><td class="number ahead">1.64×</td></tr><tr><th scope="row">corpus: float[] 10000</th><td class="number">34.0 µs</td><td class="number">51.7 µs</td><td class="number">454.3 µs</td><td class="number ahead">1.52×</td></tr></tbody><caption>Decode, the same input buffer every call.</caption></table></div>
+
+  <h3 id="table-decode-fresh">Decode (fresh input)</h3>
+<div class="table-wrap"><table><thead><tr><th scope="col">Workload</th><th scope="col" class="number">pure-cbor</th><th scope="col" class="number">cbor-x</th><th scope="col" class="number">cborg</th><th scope="col" class="number">vs best other</th></tr></thead><tbody><tr><th scope="row">uint small †</th><td class="number">34 ns</td><td class="number">455 ns</td><td class="number">426 ns</td><td class="number ahead">12.60×</td></tr><tr><th scope="row">mixed integers</th><td class="number">45 ns</td><td class="number">448 ns</td><td class="number">561 ns</td><td class="number ahead">9.92×</td></tr><tr><th scope="row">timestamp †</th><td class="number">40 ns</td><td class="number">501 ns</td><td class="number">478 ns</td><td class="number ahead">12.03×</td></tr><tr><th scope="row">float64 †</th><td class="number">38 ns</td><td class="number">504 ns</td><td class="number">465 ns</td><td class="number ahead">12.15×</td></tr><tr><th scope="row">boolean/null †</th><td class="number">36 ns</td><td class="number">401 ns</td><td class="number">485 ns</td><td class="number ahead">11.10×</td></tr><tr><th scope="row">ASCII 8</th><td class="number">49 ns</td><td class="number">453 ns</td><td class="number">487 ns</td><td class="number ahead">9.29×</td></tr><tr><th scope="row">ASCII 32</th><td class="number">81 ns</td><td class="number">447 ns</td><td class="number">418 ns</td><td class="number ahead">5.19×</td></tr><tr><th scope="row">ASCII 64</th><td class="number">456 ns</td><td class="number">530 ns</td><td class="number">445 ns</td><td class="number behind">0.98×</td></tr><tr><th scope="row">Unicode 32</th><td class="number">503 ns</td><td class="number">550 ns</td><td class="number">689 ns</td><td class="number">1.09×</td></tr><tr><th scope="row">ASCII 4096</th><td class="number">722 ns</td><td class="number">822 ns</td><td class="number">743 ns</td><td class="number">1.03×</td></tr><tr><th scope="row">number[] 128</th><td class="number">685 ns</td><td class="number">904 ns</td><td class="number">1948 ns</td><td class="number ahead">1.32×</td></tr><tr><th scope="row">string[] 128 †</th><td class="number">2499 ns</td><td class="number">2422 ns</td><td class="number">5487 ns</td><td class="number behind">0.97×</td></tr><tr><th scope="row">mixed[] 128</th><td class="number">1131 ns</td><td class="number">1145 ns</td><td class="number">2009 ns</td><td class="number">1.01×</td></tr><tr><th scope="row">number[] 10000</th><td class="number">46.8 µs</td><td class="number">48.4 µs</td><td class="number">143.8 µs</td><td class="number">1.03×</td></tr><tr><th scope="row">Float64Array 1 KiB</th><td class="number">806 ns</td><td class="number">1140 ns</td><td class="number">–</td><td class="number ahead">1.41×</td></tr><tr><th scope="row">object: row</th><td class="number">236 ns</td><td class="number">567 ns</td><td class="number">820 ns</td><td class="number ahead">2.40×</td></tr><tr><th scope="row">object: 100 rows</th><td class="number">21.3 µs</td><td class="number">29.8 µs</td><td class="number">51.5 µs</td><td class="number ahead">1.40×</td></tr><tr><th scope="row">object: nested config</th><td class="number">1475 ns</td><td class="number">1536 ns</td><td class="number">3028 ns</td><td class="number">1.04×</td></tr><tr><th scope="row">corpus: cbor-x example4</th><td class="number">19.4 µs</td><td class="number">23.2 µs</td><td class="number">41.1 µs</td><td class="number ahead">1.19×</td></tr><tr><th scope="row">corpus: msgpack sample-large</th><td class="number">12.4 µs</td><td class="number">21.0 µs</td><td class="number">28.4 µs</td><td class="number ahead">1.70×</td></tr></tbody><caption>Decode, a new copy of the input every call, like a just-received message (inputs up to 64 KiB).</caption></table></div>
+
+  <p class="source-note">† In the full run these five workloads hit system noise (float64 decode took 34 ns there, against 15 ns in 0.4.0 and in five repeats), so their rows are the median of three further fresh-process runs.</p>
+  <h3 id="table-flows">Real-world flows: WebAuthn, COSE, CWT, mdoc</h3>
+  <p>Before timing, every library must produce the same result as pure-cbor, and pure-cbor is checked against the specs. These were measured on 0.5.0; see the 0.6.0 comparison above for the default copy mode since then.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Flow</th><th scope="col" class="number">pure-cbor</th><th scope="col" class="number">pure-cbor (borrow)</th><th scope="col" class="number">cbor-x</th><th scope="col" class="number">cborg</th><th scope="col" class="number">tiny-cbor</th><th scope="col" class="number">cbor (node-cbor)</th><th scope="col" class="number">cbor2</th></tr></thead><tbody><tr><th scope="row">WebAuthn: parse 15 attestations, extract each COSE key</th><td class="number">21.7 µs</td><td class="number">7.6 µs</td><td class="number">7.9 µs</td><td class="number">24.4 µs</td><td class="number">90.8 µs</td><td class="number">153.9 µs</td><td class="number">75.0 µs</td></tr><tr><th scope="row">COSE_Sign1: decode + build <code>Sig_structure</code> (7 messages)</th><td class="number">11.7 µs</td><td class="number">5.5 µs</td><td class="number">6.3 µs</td><td class="number">8.2 µs</td><td class="number">39.2 µs</td><td class="number">57.9 µs</td><td class="number">32.5 µs</td></tr><tr><th scope="row">CWT: token + claims (RFC 8392 A.3, A.4)</th><td class="number">1.43 µs</td><td class="number">1.00 µs</td><td class="number">0.95 µs</td><td class="number">2.08 µs</td><td class="number">8.5 µs</td><td class="number">13.4 µs</td><td class="number">7.2 µs</td></tr><tr><th scope="row">mdoc: device response + items + MSO</th><td class="number">8.5 µs</td><td class="number">6.0 µs</td><td class="number">6.5 µs</td><td class="number">14.2 µs</td><td class="number">69.0 µs</td><td class="number">59.9 µs</td><td class="number">43.9 µs</td></tr><tr><th scope="row">COSE_Key: encode</th><td class="number">692 ns</td><td class="number">686 ns</td><td class="number">474 ns</td><td class="number">862 ns</td><td class="number">6.3 µs</td><td class="number">3.4 µs</td><td class="number">9.7 µs</td></tr></tbody><caption>Real-world flows on public spec vectors, pure-cbor 0.5.0. The machine was busy for this run: read ±15% into the absolute times.</caption></table></div>
+<div class="table-wrap"><table><thead><tr><th scope="col">Flow</th><th scope="col" class="number">pure-cbor (default)</th><th scope="col" class="number">pure-cbor (borrow)</th></tr></thead><tbody><tr><th scope="row">WebAuthn</th><td class="number behind">0.37×</td><td class="number">1.04×</td></tr><tr><th scope="row">COSE_Sign1</th><td class="number behind">0.54×</td><td class="number ahead">1.15×</td></tr><tr><th scope="row">CWT</th><td class="number behind">0.66×</td><td class="number behind">0.95×</td></tr><tr><th scope="row">mdoc</th><td class="number behind">0.76×</td><td class="number">1.07×</td></tr><tr><th scope="row">COSE_Key encode</th><td class="number behind">0.69×</td><td class="number behind">0.69×</td></tr></tbody><caption>Fastest other library divided by pure-cbor, on 0.5.0; above 1 means pure-cbor is faster.</caption></table></div>
+
+  <p>The libraries WebAuthn and COSE packages actually use (tiny-cbor, node-cbor, cbor2) are 5–20× slower than pure-cbor in every flow.</p>
+
+  <h3 id="where-not-ahead">Where cbor-x is level or ahead, and why</h3>
+  <ul>
+    <li><strong>Arrays of 3–7 character strings, decoded</strong> (0.92–0.97×). The time is dominated by allocating many tiny strings, which every library pays.</li>
+    <li><strong>Long text decoded from a reused buffer</strong> (ASCII 4096, about 0.9×). pure-cbor's <code>TextDecoder</code> is strict; cbor-x's silently replaces invalid UTF-8. With fresh input they are level.</li>
+    <li><strong>Mixed and tiny-object encoding</strong> (<code>mixed[]</code>, nested config): level within noise.</li>
+    <li><strong>Encoding 64-byte strings:</strong> cborg is 8% faster (0.92×). At that size every library pays one off-heap allocation for the output.</li>
+    <li><strong>cbor-x records mode</strong> is not in the tables: it is a non-standard wire format both ends must speak. Measured separately, it decodes 100 rows in about 8.6 µs, 2.6× faster than pure-cbor, and halves the bytes, by generating object readers with <code>new Function</code>.</li>
+  </ul>
+  <h3 id="wire-size">Wire size</h3>
+  <p>pure-cbor writes preferred (smallest) map headers; cbor-x's standard encoder always writes a 3-byte map header unless <code>variableMapSize: true</code>. One object row is 57 bytes against 59; 100 rows are 5,868 against 6,068. cborg writes smaller floats, so it produces the smallest output for float-heavy data.</p>
+  <h3 id="reproduce">Reproduce</h3>
+<figure class="code"><figcaption><span>From BENCHMARK.md</span></figcaption><pre><code class="language-sh">npm install --no-save --package-lock=false cbor-x cborg
+BENCH_MS=80 BENCH_ROUNDS=5 npm run bench:isolated</code></pre></figure>
+</section>
+
+    <nav class="pager" aria-label="Previous and next page"><a class="pager-previous" href="streaming.html"><span class="pager-direction">Previous</span><span class="pager-title">Streaming</span></a><a class="pager-next" href="correctness.html"><span class="pager-direction">Next</span><span class="pager-title">Correctness</span></a></nav>
+  </main>
+  <aside class="toc-aside" aria-label="On this page"><p class="toc-title">On this page</p><div data-toc></div></aside>
+</div>
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p>pure-cbor is MIT licensed. Code excerpts are copied from <a href="https://github.com/davidgtonge/pure-cbor/tree/main/src">src/</a>; numbers come from <a href="https://github.com/davidgtonge/pure-cbor/blob/main/BENCHMARK.md">BENCHMARK.md</a> and <a href="https://github.com/davidgtonge/pure-cbor/blob/main/README.md">README.md</a>.</p>
+    <p><a href="https://www.npmjs.com/package/pure-cbor">npm</a> · <a href="https://github.com/davidgtonge/pure-cbor">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>

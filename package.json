@@ -8,7 +8,7 @@
     "type": "git",
     "url": "git+https://github.com/davidgtonge/pure-cbor.git"
   },
-  "homepage": "https://github.com/davidgtonge/pure-cbor#readme",
+  "homepage": "https://davidgtonge.github.io/pure-cbor/",
   "bugs": "https://github.com/davidgtonge/pure-cbor/issues",
   "keywords": [
     "cbor",

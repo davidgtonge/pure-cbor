@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Encode, step by step · pure-cbor</title>
+<meta name="description" content="How pure-cbor encodes a value: encode(), the staging buffer, writerFor, the writeValue dispatcher, the Writer cursor, back-patched headers and the single copy out.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%231f55b8'/%3E%3Crect x='7' y='9' width='5' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='14' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='19' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='24' y='9' width='2' height='14' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect class="brand-mark-frame" x="1" y="1" width="30" height="30" rx="8"/><rect class="brand-mark-bits" x="7" y="9" width="5" height="14" rx="1.5"/><rect class="brand-mark-bits" x="14" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="19" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="24" y="9" width="2" height="14" rx="1" opacity=".75"/></svg><span>pure-cbor</span></a>
+    <nav class="site-nav" aria-label="Site">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="principles.html">Principles</a></li>
+        <li><a href="encode.html" aria-current="page">Encode</a></li>
+        <li><a href="decode.html">Decode</a></li>
+        <li><a href="streaming.html">Streaming</a></li>
+        <li><a href="performance.html">Performance</a></li>
+        <li><a href="correctness.html">Correctness</a></li>
+        <li><a href="modules.html">Module map</a></li>
+      </ul>
+    </nav>
+    <a class="header-github" href="https://github.com/davidgtonge/pure-cbor"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+  </div>
+</header>
+<div class="page">
+  <main id="content" class="article">
+<header class="page-intro">
+  <p class="eyebrow">The tour · 2 of 7</p>
+  <h1>Encode, step by step</h1>
+  <p class="lede">Owned encoding writes a value once into a reusable staging buffer, then copies the used bytes out once. There is no sizing pass, and the output is one exactly sized allocation. This page follows a value through that path.</p>
+</header>
+<details class="toc-mobile"><summary>On this page</summary><div data-toc></div></details>
+
+<section aria-labelledby="at-a-glance">
+  <h2 id="at-a-glance">The path at a glance</h2>
+  <figure class="diagram">
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 880 700" role="img" aria-labelledby="encode-diagram-title encode-diagram-description">
+        <title id="encode-diagram-title">Encode data flow</title>
+        <desc id="encode-diagram-description">encode(value, options?) in allocation.ts handles numbers, simple values, strings and typed arrays directly, without a writer. Calls with options go through encodeWithOptions and profileOf. Everything else goes to staged(value, profile, take), which wraps the reusable staging buffer in a growable Writer and asks writerFor(profile) in codec.ts for a write function: writeValue for the default profile, optionsWriter otherwise. writeValue dispatches to writeScalar in scalar.ts, ArrayCodec.write in array.ts, writeObject in map.ts, the typed-array writers, or writeRareValue for bigint, Date, Map, Tagged and simple values. Nested items re-enter writeValue with depth plus one. All of them write bytes at the Writer's cursor, growing its buffer when needed. Finally copyOut slices the used bytes into one owned Uint8Array.</desc>
+        <defs>
+          <marker id="encode-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="dg-arrowhead" d="M0 0L10 5L0 10z"/></marker>
+          <marker id="encode-arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="dg-arrowhead-muted" d="M0 0L10 5L0 10z"/></marker>
+          <marker id="encode-arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="dg-arrowhead-accent" d="M0 0L10 5L0 10z"/></marker>
+        </defs>
+
+        <!-- Row 1: entry -->
+        <rect class="dg-box-muted" x="20" y="20" width="250" height="64" rx="8"/>
+        <text class="dg-label-strong" x="145" y="42" text-anchor="middle">Direct, no writer</text>
+        <text class="dg-text" x="145" y="60" text-anchor="middle">number, true/false/null, string,</text>
+        <text class="dg-text" x="145" y="75" text-anchor="middle">typed array: exact-size output</text>
+        <rect class="dg-box-accent" x="320" y="20" width="240" height="64" rx="8"/>
+        <text class="dg-title" x="440" y="47" text-anchor="middle">encode(value, options?)</text>
+        <text class="dg-label" x="440" y="66" text-anchor="middle">allocation.ts</text>
+        <rect class="dg-box" x="610" y="20" width="250" height="64" rx="8"/>
+        <text class="dg-title" x="735" y="47" text-anchor="middle">encodeWithOptions</text>
+        <text class="dg-label" x="735" y="66" text-anchor="middle">options given: profileOf(options)</text>
+        <path class="dg-line" d="M320 52 L274 52" marker-end="url(#encode-arrow)"/>
+        <path class="dg-line" d="M560 52 L606 52" marker-end="url(#encode-arrow)"/>
+
+        <!-- Row 2: staging -->
+        <rect class="dg-box" x="300" y="120" width="280" height="60" rx="8"/>
+        <text class="dg-title" x="440" y="145" text-anchor="middle">staged(value, profile, take)</text>
+        <text class="dg-label" x="440" y="164" text-anchor="middle">allocation.ts · reusable staging buffer</text>
+        <path class="dg-line-accent" d="M440 84 L440 116" marker-end="url(#encode-arrow-accent)"/>
+        <text class="dg-label" x="290" y="104" text-anchor="end">containers, bigint, Date, Tagged…</text>
+        <path class="dg-line" d="M735 84 L735 150 L584 150" marker-end="url(#encode-arrow)"/>
+        <text class="dg-label" x="745" y="120">objects; others: encode()</text>
+
+        <!-- Row 3: choose a write function -->
+        <rect class="dg-box" x="320" y="218" width="240" height="56" rx="8"/>
+        <text class="dg-title" x="440" y="243" text-anchor="middle">writerFor(profile)</text>
+        <text class="dg-label" x="440" y="261" text-anchor="middle">codec.ts</text>
+        <path class="dg-line-accent" d="M440 180 L440 214" marker-end="url(#encode-arrow-accent)"/>
+        <text class="dg-mono" x="450" y="202">createWriter(staging, 0, true)</text>
+        <rect class="dg-box" x="610" y="218" width="250" height="56" rx="8"/>
+        <text class="dg-title" x="735" y="243" text-anchor="middle">optionsWriter(profile)</text>
+        <text class="dg-label" x="735" y="261" text-anchor="middle">shortest floats · sorted keys</text>
+        <path class="dg-line" d="M560 246 L606 246" marker-end="url(#encode-arrow)"/>
+        <text class="dg-label" x="585" y="238" text-anchor="middle">other</text>
+
+        <!-- Row 4: dispatcher -->
+        <rect class="dg-box-accent" x="300" y="310" width="280" height="56" rx="8"/>
+        <text class="dg-title" x="440" y="335" text-anchor="middle">writeValue(writer, value, depth)</text>
+        <text class="dg-label" x="440" y="353" text-anchor="middle">codec.ts · default profile</text>
+        <path class="dg-line-accent" d="M440 274 L440 306" marker-end="url(#encode-arrow-accent)"/>
+        <text class="dg-label" x="450" y="295">DEFAULT_PROFILE</text>
+
+        <!-- Recursion -->
+        <text class="dg-text" x="24" y="318">Array elements, object values,</text>
+        <text class="dg-text" x="24" y="334">Map entries and tag content</text>
+        <text class="dg-text" x="24" y="350">re-enter writeValue at depth + 1</text>
+        <path class="dg-line-dashed" d="M226 418 L226 372 Q226 360 238 360 L296 360" marker-end="url(#encode-arrow-muted)"/>
+        <path class="dg-line-dashed" d="M846 418 L846 372 Q846 360 834 360 L584 360" marker-end="url(#encode-arrow-muted)"/>
+
+        <!-- Row 5: codecs -->
+        <path class="dg-line" d="M440 366 L440 392 M96 392 L784 392"/>
+        <path class="dg-line" d="M96 392 L96 416" marker-end="url(#encode-arrow)"/>
+        <path class="dg-line" d="M268 392 L268 416" marker-end="url(#encode-arrow)"/>
+        <path class="dg-line" d="M440 392 L440 416" marker-end="url(#encode-arrow)"/>
+        <path class="dg-line" d="M612 392 L612 416" marker-end="url(#encode-arrow)"/>
+        <path class="dg-line" d="M784 392 L784 416" marker-end="url(#encode-arrow)"/>
+
+        <rect class="dg-box" x="20" y="420" width="152" height="78" rx="8"/>
+        <text class="dg-title" x="96" y="442" text-anchor="middle">writeScalar</text>
+        <text class="dg-label" x="96" y="458" text-anchor="middle">scalar.ts</text>
+        <text class="dg-text" x="96" y="476" text-anchor="middle">number, string,</text>
+        <text class="dg-text" x="96" y="490" text-anchor="middle">boolean, null, undefined</text>
+
+        <rect class="dg-box" x="192" y="420" width="152" height="78" rx="8"/>
+        <text class="dg-title" x="268" y="442" text-anchor="middle">ArrayCodec.write</text>
+        <text class="dg-label" x="268" y="458" text-anchor="middle">array.ts</text>
+        <text class="dg-text" x="268" y="476" text-anchor="middle">local cursor,</text>
+        <text class="dg-text" x="268" y="490" text-anchor="middle">scalars inline</text>
+
+        <rect class="dg-box" x="364" y="420" width="152" height="78" rx="8"/>
+        <text class="dg-title" x="440" y="442" text-anchor="middle">writeObject</text>
+        <text class="dg-label" x="440" y="458" text-anchor="middle">map.ts</text>
+        <text class="dg-text" x="440" y="476" text-anchor="middle">for…in, header</text>
+        <text class="dg-text" x="440" y="490" text-anchor="middle">patched at the end</text>
+
+        <rect class="dg-box" x="536" y="420" width="152" height="78" rx="8"/>
+        <text class="dg-title" x="612" y="442" text-anchor="middle">TypedArrayCodec</text>
+        <text class="dg-label" x="612" y="458" text-anchor="middle">typed-array.ts</text>
+        <text class="dg-text" x="612" y="476" text-anchor="middle">writeByteString,</text>
+        <text class="dg-text" x="612" y="490" text-anchor="middle">write: one bulk set()</text>
+
+        <rect class="dg-box" x="708" y="420" width="152" height="78" rx="8"/>
+        <text class="dg-title" x="784" y="442" text-anchor="middle">writeRareValue</text>
+        <text class="dg-label" x="784" y="458" text-anchor="middle">codec.ts</text>
+        <text class="dg-text" x="784" y="476" text-anchor="middle">bigint, Date, writeMap,</text>
+        <text class="dg-text" x="784" y="490" text-anchor="middle">Tagged, SimpleValue</text>
+
+        <!-- Row 6: the writer -->
+        <path class="dg-line" d="M96 498 L96 526 M268 498 L268 526 M440 498 L440 526 M612 498 L612 526 M784 498 L784 526"/>
+        <rect class="dg-box-hot" x="20" y="530" width="840" height="60" rx="8"/>
+        <text class="dg-title" x="440" y="554" text-anchor="middle">Writer { bytes, position, growable }</text>
+        <text class="dg-text" x="440" y="575" text-anchor="middle">writer.ts · ensure() and roomFor() call grow(), which copies into a buffer at least twice the size</text>
+
+        <!-- Row 7: copy out -->
+        <path class="dg-line-accent" d="M440 590 L440 626" marker-end="url(#encode-arrow-accent)"/>
+        <text class="dg-mono" x="450" y="612">end = writer.position</text>
+        <rect class="dg-box-accent" x="280" y="630" width="320" height="60" rx="8"/>
+        <text class="dg-title" x="440" y="655" text-anchor="middle">copyOut: bytes.slice(0, end)</text>
+        <text class="dg-label" x="440" y="674" text-anchor="middle">one exactly sized, owned Uint8Array</text>
+      </svg>
+    </div>
+    <p class="scroll-hint">Scroll sideways to see the whole diagram.</p>
+    <figcaption>The default path is marked in blue. Options take a separate route through <code>optionsWriter</code>, so <code>writeValue</code> never checks them.</figcaption>
+  </figure>
+</section>
+
+<section aria-labelledby="worked-example">
+  <h2 id="worked-example">A worked example</h2>
+  <p>Encoding <code>{ id: 7, name: 'Ada' }</code> produces these 14 bytes. The object writer reserves one byte for the map header, writes each key and value with a local cursor, and fills the header in last, once it knows there were two entries.</p>
+  <figure class="diagram compact">
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 660 150" role="img" aria-labelledby="encode-bytes-title encode-bytes-description">
+        <title id="encode-bytes-title">The bytes of { id: 7, name: 'Ada' }</title>
+        <desc id="encode-bytes-description">Fourteen bytes: a2, the map header for two entries, reserved first and written last by writeArgument; 62 69 64, text "id" written by writeKey; 07, the unsigned integer 7 written inline by NumberCodec.write; 64 6e 61 6d 65, text "name" written by writeKey; 63 41 64 61, text "Ada" written by StringCodec.write.</desc>
+        <text class="dg-hot-text" x="20" y="22">a2: map of 2 entries. Reserved at offset 0, written last.</text>
+        <path class="dg-line-dashed" d="M42 28 L42 44"/>
+        <g>
+          <rect class="dg-byte-header" x="20" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="42" y="71" text-anchor="middle">a2</text>
+          <rect class="dg-byte" x="64" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="86" y="71" text-anchor="middle">62</text>
+          <rect class="dg-byte" x="108" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="130" y="71" text-anchor="middle">69</text>
+          <rect class="dg-byte" x="152" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="174" y="71" text-anchor="middle">64</text>
+          <rect class="dg-byte" x="196" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="218" y="71" text-anchor="middle">07</text>
+          <rect class="dg-byte" x="240" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="262" y="71" text-anchor="middle">64</text>
+          <rect class="dg-byte" x="284" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="306" y="71" text-anchor="middle">6e</text>
+          <rect class="dg-byte" x="328" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="350" y="71" text-anchor="middle">61</text>
+          <rect class="dg-byte" x="372" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="394" y="71" text-anchor="middle">6d</text>
+          <rect class="dg-byte" x="416" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="438" y="71" text-anchor="middle">65</text>
+          <rect class="dg-byte" x="460" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="482" y="71" text-anchor="middle">63</text>
+          <rect class="dg-byte" x="504" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="526" y="71" text-anchor="middle">41</text>
+          <rect class="dg-byte" x="548" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="570" y="71" text-anchor="middle">64</text>
+          <rect class="dg-byte" x="592" y="46" width="44" height="40" rx="4"/><text class="dg-byte-text" x="614" y="71" text-anchor="middle">61</text>
+        </g>
+        <path class="dg-line" d="M68 96 L68 102 L192 102 L192 96 M200 96 L200 102 L236 102 L236 96 M244 96 L244 102 L456 102 L456 96 M464 96 L464 102 L632 102 L632 96"/>
+        <text class="dg-label-strong" x="130" y="120" text-anchor="middle">text(2) "id"</text>
+        <text class="dg-mono" x="130" y="137" text-anchor="middle">writeKey</text>
+        <text class="dg-label-strong" x="218" y="120" text-anchor="middle">7</text>
+        <text class="dg-mono" x="218" y="137" text-anchor="middle">inline</text>
+        <text class="dg-label-strong" x="350" y="120" text-anchor="middle">text(4) "name"</text>
+        <text class="dg-mono" x="350" y="137" text-anchor="middle">writeKey</text>
+        <text class="dg-label-strong" x="548" y="120" text-anchor="middle">text(3) "Ada"</text>
+        <text class="dg-mono" x="548" y="137" text-anchor="middle">StringCodec.write</text>
+      </svg>
+    </div>
+    <p class="scroll-hint">Scroll sideways to see the whole diagram.</p>
+    <figcaption>Output of <code>encode({ id: 7, name: 'Ada' })</code>. Each initial byte holds the major type in its top three bits and a small argument in its low five: <code>a2</code> is major type 5 (map) with argument 2.</figcaption>
+  </figure>
+</section>
+
+<section aria-labelledby="front-door">
+  <h2 id="front-door">1. <code>encode()</code>: the front door</h2>
+  <p>The public <code>encode</code> lives in <code>allocation.ts</code>, because it is an allocation policy. Options leave on the first line. Numbers, booleans, <code>null</code>, <code>undefined</code> and typed arrays have sizes known up front, so they are written straight into an exactly sized array with no writer at all. Strings go directly into staging memory. Everything else is staged.</p>
+<figure class="code" data-source="src/allocation.ts" data-lines="42-70"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Exact-sized, independently owned output. Small outputs never touch a
+ * `.buffer`, so they stay cheap V8 on-heap allocations. */
+export function encode(value: Value, options?: EncodeOptions): Uint8Array {
+  // Options take a separate path; the default below is unchanged by them.
+  if (options !== undefined) return encodeWithOptions(value, profileOf(options));
+  if (typeof value === 'number') {
+    const bytes = new Uint8Array(NumberCodec.size(value));
+    NumberCodec.write(bytes, 0, value);
+    return bytes;
+  }
+  if (Simple.isSimple(value)) {
+    const bytes = new Uint8Array(1);
+    bytes[0] = Simple.tokenOf(value);
+    return bytes;
+  }
+  if (typeof value === 'string') {
+    // Direct into staging: the most common owned value needs no writer.
+    const capacity = StringCodec.maxSize(value);
+    if (capacity &gt; STAGING_LIMIT || stagingInUse) return StringCodec.encodeOwned(value);
+    if (staging.length &lt; capacity) staging = new Uint8Array(Math.max(capacity, 2 * staging.length, 256));
+    return staging.slice(0, StringCodec.write(staging, 0, value));
+  }
+  if (arrayKind(value) !== undefined) {
+    const bytes = new Uint8Array(TypedArrayCodec.size(value as TypedArray));
+    TypedArrayCodec.write(bytes, 0, value as TypedArray);
+    return bytes;
+  }
+  return staged(value, DEFAULT_PROFILE, copyOut);
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="staging">
+  <h2 id="staging">2. <code>staged()</code>: one growable pass</h2>
+  <p>The staging buffer is the only module-level memory the encoder uses, and it holds no data between calls: <code>take</code> must copy what it needs before <code>staged</code> returns. If an exotic input such as an accessor property calls <code>encode</code> again in the middle, the inner call gets a private buffer instead. A buffer that grew past 64 KiB is not kept.</p>
+<figure class="code" data-source="src/allocation.ts" data-lines="11-40"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">src/allocation.ts</a></figcaption><pre><code class="language-ts">/** Staging memory for owned text and container output: one growable pass,
+ * then the used bytes are copied out once. One output allocation and no
+ * sizing pass. (In V8 any typed array over 64 bytes is a separate off-heap
+ * allocation costing ~0.5 µs, so allocation count dominates.) It holds no data
+ * between calls; a reentrant call, possible only through exotic inputs such
+ * as accessor properties, uses a private buffer instead. */
+const STAGING_LIMIT = 64 * 1024;
+let staging: Uint8Array = new Uint8Array(0);
+let stagingInUse = false;
+
+/** Encode into staging memory and hand the used bytes to `take`, which must
+ * copy what it needs before returning. */
+function staged&lt;R&gt;(value: Value, profile: EncodeProfile, take: (bytes: Uint8Array, end: number) =&gt; R): R {
+  if (stagingInUse) {
+    const writer = createWriter(new Uint8Array(256), 0, true);
+    writerFor(profile)(writer, value, 0);
+    return take(writer.bytes, writer.position);
+  }
+  stagingInUse = true;
+  try {
+    const writer = createWriter(staging, 0, true);
+    writerFor(profile)(writer, value, 0);
+    if (writer.bytes.length &lt;= STAGING_LIMIT) staging = writer.bytes;
+    return take(writer.bytes, writer.position);
+  } finally {
+    stagingInUse = false;
+  }
+}
+
+const copyOut = (bytes: Uint8Array, end: number): Uint8Array =&gt; bytes.slice(0, end);</code></pre></figure>
+  <p>The README gives the reason for this design: in V8 every typed array over 64 bytes is a separate off-heap allocation of about 0.5 µs, so allocation count dominates. Writing once into reused memory and copying out once gives one output allocation and no sizing pass.</p>
+</section>
+
+<section aria-labelledby="writer-for">
+  <h2 id="writer-for">3. <code>writerFor()</code> picks the write function</h2>
+  <p>For the default profile this is a single identity comparison. Other profiles get a separate recursive writer, built once and kept in a <code>Map</code>. The <a href="principles.html#options-choose-functions">principles page</a> shows how profiles are chosen.</p>
+<figure class="code" data-source="src/codec.ts" data-lines="147-159"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">const writers = new Map&lt;EncodeProfile, WriteValue&gt;();
+
+/** The write function for an encode profile. The default needs no lookup:
+ * this runs on every encode call. */
+export function writerFor(profile: EncodeProfile): WriteValue {
+  if (profile === DEFAULT_PROFILE) return writeValue;
+  let writer = writers.get(profile);
+  if (writer === undefined) {
+    writer = optionsWriter(profile);
+    writers.set(profile, writer);
+  }
+  return writer;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="write-value">
+  <h2 id="write-value">4. <code>writeValue()</code>: the dispatcher</h2>
+  <p>The dispatcher tests the common types first: scalars, then arrays, plain objects, byte strings and typed arrays. The rarer variants are moved into a second function, <code>writeRareValue</code>, which keeps the hot one small. Containers get <code>nestedDepth(depth)</code>, which fails with <code>depth-limit</code> at 128 levels. That limit also turns cyclic input into a typed error.</p>
+<figure class="code" data-source="src/codec.ts" data-lines="22-28,64-106"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** Encode-side nesting limit; also turns cyclic input into a typed error. */
+const MAX_ENCODE_DEPTH = 128;
+
+function nestedDepth(depth: number): number {
+  if (depth &gt;= MAX_ENCODE_DEPTH) fail('depth-limit', 0, 'Nesting exceeds maximum depth (cyclic input?)');
+  return depth + 1;
+}
+// …
+// ---------------------------------------------------------------- writing
+
+/** Write one value at the writer's cursor. Growable writers grow as needed;
+ * fixed writers were preflighted by the caller. */
+export function writeValue(writer: Writer, value: Value, depth: number): void {
+  const end = writeScalar(writer, writer.position, value);
+  if (end !== NOT_SCALAR) {
+    writer.position = end;
+  } else if (Array.isArray(value)) {
+    ArrayCodec.write(writer, value, nestedDepth(depth), writeValue);
+  } else if (MapCodec.isPlainObject(value)) {
+    MapCodec.writeObject(writer, value, nestedDepth(depth), writeValue);
+  } else if (value instanceof Uint8Array) { // and Buffer: a byte string, no kind lookup
+    ensure(writer, 9 + value.length);
+    writer.position = TypedArrayCodec.writeByteString(writer.bytes, writer.position, value);
+  } else if (arrayKind(value) !== undefined) {
+    ensure(writer, TypedArrayCodec.size(value as TypedArray));
+    writer.position = TypedArrayCodec.write(writer.bytes, writer.position, value as TypedArray);
+  } else {
+    writeRareValue(writer, value, depth);
+  }
+}
+
+/** bigint, Date, Map, Tagged and SimpleValue. */
+function writeRareValue(writer: Writer, value: Value, depth: number): void {
+  if (typeof value === 'bigint') {
+    ensure(writer, Bignum.size(value));
+    writer.position = Bignum.write(writer.bytes, writer.position, value);
+  } else if (value instanceof Date) {
+    writeDate(writer, value, false);
+  } else if (value instanceof Map) {
+    MapCodec.writeMap(writer, value, nestedDepth(depth), writeValue);
+  } else if (Tag.isTagged(value)) {
+    ensure(writer, argumentSize(value.tag));
+    writer.position = writeArgument(writer.bytes, writer.position, MajorBits.Tag, value.tag);
+    writeValue(writer, value.value, nestedDepth(depth));
+  } else if (Simple.isSimpleValue(value)) {
+    ensure(writer, Simple.simpleSize(value));
+    writer.position = Simple.writeSimpleValue(writer.bytes, writer.position, value);
+  } else {
+    unsupported();
+  }
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="scalars">
+  <h2 id="scalars">5. Scalars and the argument header</h2>
+  <p><code>writeScalar</code> returns the new position, or <code>NOT_SCALAR</code> so the dispatcher can carry on. It asks the writer for room first: 9 bytes covers any number.</p>
+<figure class="code" data-source="src/scalar.ts" data-lines="7-28"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/scalar.ts">src/scalar.ts</a></figcaption><pre><code class="language-ts">/** Returned by writeScalar when the value is not a scalar. */
+export const NOT_SCALAR = -1;
+
+/** Above this many UTF-16 units, size strings exactly rather than reserving 3 bytes per unit. */
+const LARGE_STRING = 16 * 1024;
+
+/** Write a number, string, boolean, null or undefined at `position` and
+ * return the new position, or NOT_SCALAR for anything else. */
+export function writeScalar(writer: Writer, position: number, value: unknown): number {
+  if (typeof value === 'number') {
+    return NumberCodec.write(roomFor(writer, position, 9), position, value);
+  }
+  if (typeof value === 'string') {
+    const capacity = value.length &gt; LARGE_STRING ? StringCodec.size(value) : StringCodec.maxSize(value);
+    return StringCodec.write(roomFor(writer, position, capacity), position, value);
+  }
+  if (Simple.isSimple(value)) {
+    roomFor(writer, position, 1)[position] = Simple.tokenOf(value);
+    return position + 1;
+  }
+  return NOT_SCALAR;
+}</code></pre></figure>
+  <p>Safe integers are always CBOR integers in their preferred width, so millisecond timestamps reach other languages as integers. Everything else, including <code>-0</code> and NaN, is binary64 by default:</p>
+<figure class="code" data-source="src/number.ts" data-lines="17-24,113-123"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/number.ts">src/number.ts</a></figcaption><pre><code class="language-ts">/** Every safe integer is a CBOR integer in its preferred width, so other
+ * languages receive integer types (e.g. millisecond timestamps). Everything
+ * else (fractions, -0, NaN, infinities, unsafe integers) is binary64. */
+function majorTypeOf(value: number): Major.Unsigned | Major.Negative | Major.Simple {
+  if ((value &gt;&gt;&gt; 0) === value) return Object.is(value, -0) ? FLOAT : Major.Unsigned;
+  if (Number.isSafeInteger(value)) return value &lt; 0 ? Major.Negative : Major.Unsigned;
+  return FLOAT;
+}
+// …
+/** The default: integers in their preferred width, everything else binary64. */
+export function write(bytes: Uint8Array, offset: number, value: number): number {
+  const majorType = majorTypeOf(value);
+  if (majorType === FLOAT) {
+    writable(bytes, offset, 9);
+    return writeFloat64(bytes, offset, value);
+  }
+  const argument = majorType === Major.Unsigned ? value : -1 - value;
+  writable(bytes, offset, argumentSize(argument));
+  return writeArgument(bytes, offset, majorType &lt;&lt; 5, argument);
+}</code></pre></figure>
+  <p>Every header goes through <code>writeArgument</code>, which picks the smallest width for the argument. It writes byte by byte, with no DataView:</p>
+<figure class="code" data-source="src/header.ts" data-lines="49-76"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/header.ts">src/header.ts</a></figcaption><pre><code class="language-ts">/** majorBits is the already-shifted major type, e.g. 0x60 for text.
+ * Internal primitive: the caller checks capacity for header and payload once. */
+export function writeArgument(bytes: Uint8Array, offset: number, majorBits: number, argument: number): number {
+  if (argument &lt; 24) {
+    bytes[offset] = majorBits | argument;
+    return offset + 1;
+  }
+  if (argument &lt; 256) {
+    bytes[offset] = majorBits | 24;
+    bytes[offset + 1] = argument;
+    return offset + 2;
+  }
+  if (argument &lt; 65536) {
+    bytes[offset] = majorBits | 25;
+    bytes[offset + 1] = argument &gt;&gt;&gt; 8;
+    bytes[offset + 2] = argument;
+    return offset + 3;
+  }
+  if (argument &lt;= MAX_UINT32) {
+    bytes[offset] = majorBits | 26;
+    writeUint32(bytes, offset + 1, argument);
+    return offset + 5;
+  }
+  bytes[offset] = majorBits | 27;
+  writeUint32(bytes, offset + 1, Math.floor(argument / TWO_POW_32));
+  writeUint32(bytes, offset + 5, argument &gt;&gt;&gt; 0);
+  return offset + 9;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="writer-cursor">
+  <h2 id="writer-cursor">6. The <code>Writer</code> cursor</h2>
+  <p>A growable writer reallocates on demand; a fixed writer wraps caller memory and never grows, because its capacity was checked before writing began. Loops that keep the cursor in a local variable call <code>roomFor</code>, which stores the position back only if it has to grow.</p>
+<figure class="code" data-source="src/writer.ts" data-lines="34-53"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/writer.ts">src/writer.ts</a></figcaption><pre><code class="language-ts">/** Make room for `byteCount` more bytes at the cursor (growable writers only). */
+export function ensure(writer: Writer, byteCount: number): void {
+  if (byteCount &gt; writer.bytes.length - writer.position &amp;&amp; writer.growable) grow(writer, byteCount);
+}
+
+/** The writer's bytes, with room for `byteCount` at `position`. For loops that
+ * keep the cursor in a local variable; fixed writers were preflighted. */
+export function roomFor(writer: Writer, position: number, byteCount: number): Uint8Array {
+  if (byteCount &gt; writer.bytes.length - position &amp;&amp; writer.growable) {
+    writer.position = position;
+    grow(writer, byteCount);
+  }
+  return writer.bytes;
+}
+
+function grow(writer: Writer, byteCount: number): void {
+  const larger = new Uint8Array(Math.max(2 * writer.bytes.length, writer.position + byteCount, 256));
+  larger.set(writer.bytes.subarray(0, writer.position));
+  writer.bytes = larger;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="arrays">
+  <h2 id="arrays">7. Arrays: a local cursor and inline scalars</h2>
+  <p>The array writer keeps <code>position</code> in a local variable and spells out the scalar cases rather than calling <code>writeScalar</code>. Only nested items go back through the dispatcher, which is passed in as a parameter so that <code>array.ts</code> does not import <code>codec.ts</code>.</p>
+<figure class="code" data-source="src/array.ts" data-lines="28-49"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/array.ts">src/array.ts</a></figcaption><pre><code class="language-ts">/** Scalars are written inline with a local cursor (the hot path); only
+ * nested items go through the dispatcher. The scalar branches are spelled out
+ * here rather than calling writeScalar: V8 often declines to inline a shared
+ * helper into this loop, and that measured 10-20% slower. */
+export function write(writer: Writer, values: readonly Value[], depth: number, writeValue: WriteValue): void {
+  let position = writeArgument(roomFor(writer, writer.position, 9), writer.position, MajorBits.Array, values.length);
+  for (let index = 0; index &lt; values.length; index++) {
+    const element = values[index];
+    if (typeof element === 'number') {
+      position = NumberCodec.write(roomFor(writer, position, 9), position, element);
+    } else if (typeof element === 'string') {
+      position = StringCodec.write(roomFor(writer, position, StringCodec.maxSize(element)), position, element);
+    } else if (Simple.isSimple(element)) { // includes undefined and holes
+      roomFor(writer, position, 1)[position++] = Simple.tokenOf(element);
+    } else {
+      writer.position = position;
+      writeValue(writer, element, depth);
+      position = writer.position;
+    }
+  }
+  writer.position = position;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="objects">
+  <h2 id="objects">8. Plain objects and the back-patched header</h2>
+  <p>Only objects whose prototype is <code>Object.prototype</code> or <code>null</code> are encoded as maps; dates, class instances and boxed primitives are rejected rather than flattened. Keys are enumerated with <code>for…in</code>, and the own-property check runs only if <code>Object.prototype</code> has gained enumerable properties.</p>
+<figure class="code" data-source="src/map.ts" data-lines="20-33"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** Plain objects only: prototype Object.prototype or null. Dates, Maps, class
+ * instances and boxed primitives are rejected rather than silently flattened. */
+export function isPlainObject(value: unknown): value is ValueObject {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** True if Object.prototype has gained enumerable properties (prototype
+ * pollution), which `for...in` would otherwise report as the object's own. */
+function objectPrototypeHasEnumerableKeys(): boolean {
+  for (const _ in Object.prototype) return true;
+  return false;
+}</code></pre></figure>
+  <p>The entry count is only known after the loop, because properties set to <code>undefined</code> are skipped. So the writer reserves one header byte, which is enough for up to 23 entries, and fills it in at the end. A larger map shifts its entries right by the extra header bytes, which keeps the preferred, smallest header.</p>
+<figure class="code" data-source="src/map.ts" data-lines="57-109"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** One pass with a local cursor. The entry count is only known at the end, so
+ * a 1-byte header (fewer than 24 entries, the common case) is reserved and
+ * filled in last; larger maps shift their entries right to fit the wider
+ * header, which keeps the preferred (smallest) encoding. */
+export function writeObject(writer: Writer, object: ValueObject, depth: number, writeValue: WriteValue): void {
+  const checkOwn = objectPrototypeHasEnumerableKeys();
+  const headerOffset = writer.position;
+  roomFor(writer, headerOffset, 1);
+  let position = headerOffset + 1;
+  let entryCount = 0;
+  for (const key in object) {
+    if (checkOwn &amp;&amp; !Object.hasOwn(object, key)) continue;
+    const value = object[key];
+    if (value === undefined) continue;
+    entryCount++;
+    position = writeKey(writer, position, key);
+    // Scalar values inline, as in the array writer (see the note there).
+    if (typeof value === 'number') {
+      position = NumberCodec.write(roomFor(writer, position, 9), position, value);
+    } else if (typeof value === 'string') {
+      position = StringCodec.write(roomFor(writer, position, StringCodec.maxSize(value)), position, value);
+    } else if (Simple.isSimple(value)) {
+      roomFor(writer, position, 1)[position++] = Simple.tokenOf(value);
+    } else {
+      writer.position = position;
+      writeValue(writer, value, depth);
+      position = writer.position;
+    }
+  }
+  const extraHeaderBytes = argumentSize(entryCount) - 1;
+  const bytes = roomFor(writer, position, extraHeaderBytes);
+  if (extraHeaderBytes &gt; 0) {
+    bytes.copyWithin(headerOffset + 1 + extraHeaderBytes, headerOffset + 1, position);
+    position += extraHeaderBytes;
+  }
+  writeArgument(bytes, headerOffset, MajorBits.Map, entryCount);
+  writer.position = position;
+}
+
+/** Keys are usually short ASCII: write the 1-byte header and the characters
+ * directly. Anything else goes through the general text writer. */
+function writeKey(writer: Writer, position: number, key: string): number {
+  const length = key.length;
+  if (length &gt;= 24) return StringCodec.write(roomFor(writer, position, StringCodec.maxSize(key)), position, key);
+  const bytes = roomFor(writer, position, length + 1);
+  for (let index = 0; index &lt; length; index++) {
+    const unit = key.charCodeAt(index);
+    if (unit &gt;= 0x80) return StringCodec.write(roomFor(writer, position, StringCodec.maxSize(key)), position, key);
+    bytes[position + 1 + index] = unit;
+  }
+  bytes[position] = MajorBits.Text | length;
+  return position + 1 + length;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="maps">
+  <h2 id="maps">9. <code>Map</code>: any keys, inline COSE shapes</h2>
+  <p>A <code>Map</code> knows its size up front, so its header is written first. Keys and values share one helper with inline paths for the shapes COSE uses: integer and short text keys, and byte-string and scalar values.</p>
+<figure class="code" data-source="src/map.ts" data-lines="134-160"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** Any key types, in insertion order; undefined values are written (f7).
+ * A local cursor with inline paths for the common COSE shapes (integer and
+ * short text keys, byte-string and scalar values); anything else goes through
+ * the dispatcher. */
+export function writeMap(writer: Writer, map: ReadonlyMap&lt;Value, Value&gt;, depth: number, writeValue: WriteValue): void {
+  let position = writeArgument(roomFor(writer, writer.position, 9), writer.position, MajorBits.Map, map.size);
+  for (const [key, value] of map) {
+    position = writeMapItem(writer, position, key, depth, writeValue);
+    position = writeMapItem(writer, position, value, depth, writeValue);
+  }
+  writer.position = position;
+}
+
+function writeMapItem(writer: Writer, position: number, item: Value, depth: number, writeValue: WriteValue): number {
+  if (typeof item === 'number') return NumberCodec.write(roomFor(writer, position, 9), position, item);
+  if (typeof item === 'string') return writeKey(writer, position, item);
+  if (item instanceof Uint8Array) {
+    return TypedArrayCodec.writeByteString(roomFor(writer, position, 9 + item.length), position, item);
+  }
+  if (Simple.isSimple(item)) {
+    roomFor(writer, position, 1)[position] = Simple.tokenOf(item);
+    return position + 1;
+  }
+  writer.position = position;
+  writeValue(writer, item, depth);
+  return writer.position;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="strings">
+  <h2 id="strings">10. Strings: reserve, write, patch</h2>
+  <p>Text uses the same trick as objects. The header is reserved for the string's UTF-16 length, the UTF-8 bytes are written, and the header is corrected afterwards, moving the payload only if the width changed. When the destination is tight, the exact size is computed first so a capacity error never leaves a partial write.</p>
+<figure class="code" data-source="src/string.ts" data-lines="97-112"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">/** Common path is single-pass into spare capacity, back-patching the header.
+ * Tight buffers get exact sizing first, so an insufficient-capacity error never
+ * partially writes the destination. */
+export function write(bytes: Uint8Array, offset: number, value: string): number {
+  if (maxSize(value) &gt; bytes.length - offset) {
+    return writeSized(bytes, offset, value, utf8Size(value));
+  }
+  const reservedHeader = argumentSize(value.length);
+  const payloadStart = offset + reservedHeader;
+  const payloadEnd = writeUtf8(bytes, payloadStart, value);
+  const byteLength = payloadEnd - payloadStart;
+  const actualHeader = argumentSize(byteLength);
+  if (actualHeader !== reservedHeader) bytes.copyWithin(offset + actualHeader, payloadStart, payloadEnd);
+  writeArgument(bytes, offset, MajorBits.Text, byteLength);
+  return offset + actualHeader + byteLength;
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="deterministic">
+  <h2 id="deterministic">11. Deterministic encoding</h2>
+  <p>With <code>deterministic: true</code>, <code>optionsWriter</code> collects each map's entries and writes them in the order of their encoded keys (RFC 8949 §4.2.1). Two keys that encode to the same bytes, such as <code>1</code> and <code>1n</code> in one <code>Map</code>, are a <code>duplicate-key</code> error.</p>
+<figure class="code" data-source="src/map.ts" data-lines="189-208"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** RFC 8949 §4.2.1: entries ordered by the bytes of their encoded keys.
+ * Keys that encode identically are duplicates, which deterministic CBOR forbids. */
+export function writeSortedEntries(writer: Writer, entries: ReadonlyArray&lt;readonly [Value, Value]&gt;, depth: number, writeValue: WriteValue): void {
+  const encodedKeys = entries.map(([key]) =&gt; encodeKey(key, depth, writeValue));
+  const order = entries.map((_, index) =&gt; index).toSorted((left, right) =&gt; compareBytes(encodedKeys[left], encodedKeys[right]));
+  for (let index = 1; index &lt; order.length; index++) {
+    if (compareBytes(encodedKeys[order[index - 1]], encodedKeys[order[index]]) === 0) {
+      fail('duplicate-key', writer.position, 'Duplicate map key');
+    }
+  }
+  ensure(writer, 9);
+  writer.position = writeArgument(writer.bytes, writer.position, MajorBits.Map, entries.length);
+  for (const index of order) {
+    const key = encodedKeys[index];
+    ensure(writer, key.length);
+    writer.bytes.set(key, writer.position);
+    writer.position += key.length;
+    writeValue(writer, entries[index][1], depth);
+  }
+}</code></pre></figure>
+</section>
+
+<section aria-labelledby="caller-memory">
+  <h2 id="caller-memory">12. Caller memory: measure first, never write partially</h2>
+  <p><code>encodeInto</code> and <code>write</code> use a fixed writer over the caller's bytes. Scalars check their own size. For anything else, a cheap upper bound is measured first; only if that bound exceeds the free space is the exact size measured, and a <code>capacity</code> error thrown before any byte is written.</p>
+<figure class="code" data-source="src/codec.ts" data-lines="161-177"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** Append one item into caller memory. A capacity error never partially
+ * writes: scalars check their own size, everything else is measured first. */
+export function writeBytes(bytes: Uint8Array, offset: number, value: Value, profile: EncodeProfile = DEFAULT_PROFILE): number {
+  checkOffset(bytes, offset);
+  if (typeof value === 'number') {
+    return profile.shortestFloats ? NumberCodec.writeShortest(bytes, offset, value) : NumberCodec.write(bytes, offset, value);
+  }
+  if (typeof value === 'string') return StringCodec.write(bytes, offset, value);
+  if (Simple.isSimple(value)) return Simple.write(bytes, offset, value);
+  if (arrayKind(value) !== undefined) return TypedArrayCodec.write(bytes, offset, value as TypedArray);
+  if (measure(value, true, 0, profile.shortestFloats) &gt; bytes.length - offset) {
+    writable(bytes, offset, measure(value, false, 0, profile.shortestFloats));
+  }
+  const writer = createWriter(bytes, offset, false);
+  writerFor(profile)(writer, value, 0);
+  return writer.position;
+}</code></pre></figure>
+  <p>The README notes the trade-off: for arrays and objects this guarantee costs a sizing pass, so owned <code>encode()</code> can be faster for objects.</p>
+</section>
+
+    <nav class="pager" aria-label="Previous and next page"><a class="pager-previous" href="principles.html"><span class="pager-direction">Previous</span><span class="pager-title">Core principles</span></a><a class="pager-next" href="decode.html"><span class="pager-direction">Next</span><span class="pager-title">Decode</span></a></nav>
+  </main>
+  <aside class="toc-aside" aria-label="On this page"><p class="toc-title">On this page</p><div data-toc></div></aside>
+</div>
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p>pure-cbor is MIT licensed. Code excerpts are copied from <a href="https://github.com/davidgtonge/pure-cbor/tree/main/src">src/</a>; numbers come from <a href="https://github.com/davidgtonge/pure-cbor/blob/main/BENCHMARK.md">BENCHMARK.md</a> and <a href="https://github.com/davidgtonge/pure-cbor/blob/main/README.md">README.md</a>.</p>
+    <p><a href="https://www.npmjs.com/package/pure-cbor">npm</a> · <a href="https://github.com/davidgtonge/pure-cbor">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>

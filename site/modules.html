@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Module map · pure-cbor</title>
+<meta name="description" content="Every file in pure-cbor&#x27;s src/ folder, with its role, its layer, and a link to its source on GitHub.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%231f55b8'/%3E%3Crect x='7' y='9' width='5' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='14' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='19' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='24' y='9' width='2' height='14' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect class="brand-mark-frame" x="1" y="1" width="30" height="30" rx="8"/><rect class="brand-mark-bits" x="7" y="9" width="5" height="14" rx="1.5"/><rect class="brand-mark-bits" x="14" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="19" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="24" y="9" width="2" height="14" rx="1" opacity=".75"/></svg><span>pure-cbor</span></a>
+    <nav class="site-nav" aria-label="Site">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="principles.html">Principles</a></li>
+        <li><a href="encode.html">Encode</a></li>
+        <li><a href="decode.html">Decode</a></li>
+        <li><a href="streaming.html">Streaming</a></li>
+        <li><a href="performance.html">Performance</a></li>
+        <li><a href="correctness.html">Correctness</a></li>
+        <li><a href="modules.html" aria-current="page">Module map</a></li>
+      </ul>
+    </nav>
+    <a class="header-github" href="https://github.com/davidgtonge/pure-cbor"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+  </div>
+</header>
+<div class="page">
+  <main id="content" class="article">
+<header class="page-intro">
+  <p class="eyebrow">The tour · 7 of 7</p>
+  <h1>Module map</h1>
+  <p class="lede">Twenty-three files, one job each. The dependency graph is acyclic: container codecs receive the item dispatcher as a parameter instead of importing it, and no codec depends on the allocation policy.</p>
+</header>
+<details class="toc-mobile"><summary>On this page</summary><div data-toc></div></details>
+
+<section aria-labelledby="layers">
+  <h2 id="layers">Layers</h2>
+  <p>Each module imports only from its own layer or the layers below. The modules highlighted in blue are the ones the tour spends most time in. Select a module to open its source.</p>
+  <figure class="diagram">
+    <div class="diagram-scroll">
+<svg viewBox="0 0 880 446" role="group" aria-labelledby="modules-diagram-title"><title id="modules-diagram-title">Modules in src/, by layer; each module links to its source on GitHub</title><defs><marker id="modules-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="dg-arrowhead" d="M0 0L10 5L0 10z"/></marker></defs><path class="dg-line" d="M27 18 L27 430" marker-end="url(#modules-arrow)"/><text class="dg-label" x="14" y="223" text-anchor="middle" transform="rotate(-90 14 223)">imports point down</text><rect class="dg-box-muted" x="40" y="10" width="830" height="54" rx="10"/><text class="dg-label-strong" x="60" y="41">Public API</text><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/index.ts"><title>src/index.ts on GitHub</title><rect class="dg-box" x="230" y="22" width="83" height="30" rx="6"/><text class="dg-title" x="272" y="42" text-anchor="middle">index.ts</text></a><rect class="dg-box-muted" x="40" y="76" width="830" height="54" rx="10"/><text class="dg-label-strong" x="60" y="107">Policies and adapters</text><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts"><title>src/allocation.ts on GitHub</title><rect class="dg-box-accent" x="230" y="88" width="120" height="30" rx="6"/><text class="dg-title" x="290" y="108" text-anchor="middle">allocation.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts"><title>src/sequence.ts on GitHub</title><rect class="dg-box-accent" x="360" y="88" width="105" height="30" rx="6"/><text class="dg-title" x="412" y="108" text-anchor="middle">sequence.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/stream.ts"><title>src/stream.ts on GitHub</title><rect class="dg-box" x="475" y="88" width="91" height="30" rx="6"/><text class="dg-title" x="520" y="108" text-anchor="middle">stream.ts</text></a><rect class="dg-box-muted" x="40" y="142" width="830" height="54" rx="10"/><text class="dg-label-strong" x="60" y="173">Dispatch</text><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts"><title>src/codec.ts on GitHub</title><rect class="dg-box-accent" x="230" y="154" width="83" height="30" rx="6"/><text class="dg-title" x="272" y="174" text-anchor="middle">codec.ts</text></a><rect class="dg-box-muted" x="40" y="208" width="830" height="54" rx="10"/><text class="dg-label-strong" x="60" y="239">Containers</text><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/array.ts"><title>src/array.ts on GitHub</title><rect class="dg-box" x="230" y="220" width="83" height="30" rx="6"/><text class="dg-title" x="272" y="240" text-anchor="middle">array.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts"><title>src/map.ts on GitHub</title><rect class="dg-box" x="323" y="220" width="68" height="30" rx="6"/><text class="dg-title" x="357" y="240" text-anchor="middle">map.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/keys.ts"><title>src/keys.ts on GitHub</title><rect class="dg-box" x="401" y="220" width="76" height="30" rx="6"/><text class="dg-title" x="439" y="240" text-anchor="middle">keys.ts</text></a><rect class="dg-box-muted" x="40" y="274" width="830" height="94" rx="10"/><text class="dg-label-strong" x="60" y="325">Values</text><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/number.ts"><title>src/number.ts on GitHub</title><rect class="dg-box" x="230" y="286" width="91" height="30" rx="6"/><text class="dg-title" x="276" y="306" text-anchor="middle">number.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts"><title>src/string.ts on GitHub</title><rect class="dg-box" x="331" y="286" width="91" height="30" rx="6"/><text class="dg-title" x="376" y="306" text-anchor="middle">string.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/simple.ts"><title>src/simple.ts on GitHub</title><rect class="dg-box" x="432" y="286" width="91" height="30" rx="6"/><text class="dg-title" x="478" y="306" text-anchor="middle">simple.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/tag.ts"><title>src/tag.ts on GitHub</title><rect class="dg-box" x="533" y="286" width="68" height="30" rx="6"/><text class="dg-title" x="567" y="306" text-anchor="middle">tag.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/bignum.ts"><title>src/bignum.ts on GitHub</title><rect class="dg-box" x="611" y="286" width="91" height="30" rx="6"/><text class="dg-title" x="656" y="306" text-anchor="middle">bignum.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/indefinite.ts"><title>src/indefinite.ts on GitHub</title><rect class="dg-box" x="230" y="326" width="120" height="30" rx="6"/><text class="dg-title" x="290" y="346" text-anchor="middle">indefinite.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/typed-array.ts"><title>src/typed-array.ts on GitHub</title><rect class="dg-box" x="360" y="326" width="128" height="30" rx="6"/><text class="dg-title" x="424" y="346" text-anchor="middle">typed-array.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/scalar.ts"><title>src/scalar.ts on GitHub</title><rect class="dg-box" x="498" y="326" width="91" height="30" rx="6"/><text class="dg-title" x="544" y="346" text-anchor="middle">scalar.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/arena.ts"><title>src/arena.ts on GitHub</title><rect class="dg-box" x="599" y="326" width="83" height="30" rx="6"/><text class="dg-title" x="640" y="346" text-anchor="middle">arena.ts</text></a><rect class="dg-box-muted" x="40" y="380" width="830" height="54" rx="10"/><text class="dg-label-strong" x="60" y="411">Foundation</text><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/header.ts"><title>src/header.ts on GitHub</title><rect class="dg-box-accent" x="230" y="392" width="91" height="30" rx="6"/><text class="dg-title" x="276" y="412" text-anchor="middle">header.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/binary.ts"><title>src/binary.ts on GitHub</title><rect class="dg-box" x="331" y="392" width="91" height="30" rx="6"/><text class="dg-title" x="376" y="412" text-anchor="middle">binary.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/writer.ts"><title>src/writer.ts on GitHub</title><rect class="dg-box-accent" x="432" y="392" width="91" height="30" rx="6"/><text class="dg-title" x="478" y="412" text-anchor="middle">writer.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts"><title>src/state.ts on GitHub</title><rect class="dg-box-accent" x="533" y="392" width="83" height="30" rx="6"/><text class="dg-title" x="574" y="412" text-anchor="middle">state.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/error.ts"><title>src/error.ts on GitHub</title><rect class="dg-box" x="626" y="392" width="83" height="30" rx="6"/><text class="dg-title" x="668" y="412" text-anchor="middle">error.ts</text></a><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/types.ts"><title>src/types.ts on GitHub</title><rect class="dg-box" x="719" y="392" width="83" height="30" rx="6"/><text class="dg-title" x="760" y="412" text-anchor="middle">types.ts</text></a></svg>
+
+    </div>
+    <p class="scroll-hint">Scroll sideways to see the whole diagram.</p>
+    <figcaption>Imports point down the layers, or across within one (for example <code>sequence.ts</code> uses <code>allocation.ts</code>'s <code>encode</code>, and <code>map.ts</code> uses <code>keys.ts</code>). Nothing below <code>codec.ts</code> imports it: <code>array.ts</code> and <code>map.ts</code> receive <code>readValue</code> and <code>writeValue</code> as arguments.</figcaption>
+  </figure>
+  <p>That last point is visible in the signatures. The dispatcher types are declared next to the state they act on:</p>
+<figure class="code" data-source="src/state.ts" data-lines="95-96"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** The item dispatcher, passed to container codecs so they need not import it. */
+export type ReadValue = (state: DecodeState) =&gt; Value;</code></pre></figure>
+<figure class="code" data-source="src/writer.ts" data-lines="55-58"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/writer.ts">src/writer.ts</a></figcaption><pre><code class="language-ts">/** Dispatchers passed to container codecs so they need not import codec.ts.
+ * depth is the nesting level of the value's container. */
+export type WriteValue = (writer: Writer, value: Value, depth: number) =&gt; void;
+export type MeasureValue = (value: Value, upper: boolean, depth: number, shortestFloats: boolean) =&gt; number;</code></pre></figure>
+</section>
+
+<section aria-labelledby="every-file">
+  <h2 id="every-file">Every file</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Module</th><th scope="col">Role</th><th scope="col">On this site</th></tr></thead>
+      <tbody>
+        <tr class="group-row"><th scope="rowgroup" colspan="3">Public API</th></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/index.ts">index.ts</a></th><td>The public API: re-exports, plus <code>write</code>, <code>encodeInto</code>, <code>encodedSize</code>, <code>maxEncodedSize</code>, <code>decode</code> and <code>tryDecode</code>.</td><td><a href="decode.html#front-door">Decode</a></td></tr>
+        <tr class="group-row"><th scope="rowgroup" colspan="3">Policies and adapters</th></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/allocation.ts">allocation.ts</a></th><td>Allocation policies: owned <code>encode()</code> through a staging buffer copied out once, and the opt-in slab encoder.</td><td><a href="encode.html#front-door">Encode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/sequence.ts">sequence.ts</a></th><td>CBOR sequences: the resumable boundary scanner, the incremental decoder and the sequence encoder.</td><td><a href="streaming.html#scanner">Streaming</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/stream.ts">stream.ts</a></th><td>Web Streams and async-iterator adapters over <code>sequence.ts</code>.</td><td><a href="streaming.html#adapters">Streaming</a></td></tr>
+        <tr class="group-row"><th scope="rowgroup" colspan="3">Dispatch</th></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">codec.ts</a></th><td>Major-type dispatch. Writing: <code>writeValue</code>, <code>writeRareValue</code>, <code>optionsWriter</code>, <code>writerFor</code>, <code>writeBytes</code>. Reading: <code>readItem</code>, <code>readValue</code>, <code>readTag</code>. Sizing: <code>measure</code>.</td><td><a href="encode.html#write-value">Encode</a>, <a href="decode.html#read-value">Decode</a></td></tr>
+        <tr class="group-row"><th scope="rowgroup" colspan="3">Containers</th></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/array.ts">array.ts</a></th><td>Arrays: hot loops with a local cursor and inline scalars, in both directions; nested items through the dispatcher.</td><td><a href="encode.html#arrays">Encode</a>, <a href="decode.html#arrays">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">map.ts</a></th><td>Plain objects and <code>Map</code>: enumeration, key writing, decode modes, duplicate detection, sorted entries for deterministic encoding, and <code>__proto__</code> safety.</td><td><a href="encode.html#objects">Encode</a>, <a href="decode.html#maps">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/keys.ts">keys.ts</a></th><td>The decoded-key cache: 1,024 slots for keys of up to 32 bytes, confirmed byte for byte.</td><td><a href="decode.html#key-cache">Decode</a></td></tr>
+        <tr class="group-row"><th scope="rowgroup" colspan="3">Values</th></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/number.ts">number.ts</a></th><td>Integers and floats: preferred widths, shortest floats, and float conversion through a scratch array instead of a DataView.</td><td><a href="encode.html#scalars">Encode</a>, <a href="performance.html#no-dataview">Performance</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">string.ts</a></th><td>UTF-8: sizing, single-pass writes with a back-patched header, short ASCII and short UTF-8 decode paths, strict <code>TextDecoder</code> fallback.</td><td><a href="encode.html#strings">Encode</a>, <a href="decode.html#text">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/simple.ts">simple.ts</a></th><td>Major type 7: <code>false</code>, <code>true</code>, <code>null</code>, <code>undefined</code>, the <code>SimpleValue</code> variant, and float dispatch.</td><td><a href="decode.html#read-item">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/tag.ts">tag.ts</a></th><td>The <code>Tagged</code> variant, dates, and built-in and custom tag decoding.</td><td><a href="principles.html#variants">Principles</a>, <a href="decode.html#tags">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/bignum.ts">bignum.ts</a></th><td><code>bigint</code> to and from 64-bit integers and bignums (tags 2 and 3).</td><td></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/indefinite.ts">indefinite.ts</a></th><td>Indefinite-length byte and text strings. Decode only; the library always encodes definite lengths.</td><td></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/typed-array.ts">typed-array.ts</a></th><td>RFC 8746 typed-array tags, payload ownership (copy or borrow) and byte order; byte strings.</td><td><a href="decode.html#tags">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/scalar.ts">scalar.ts</a></th><td>The shared scalar writer used by the dispatcher.</td><td><a href="encode.html#scalars">Encode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/arena.ts">arena.ts</a></th><td>The per-decode arena for byte strings over 64 bytes.</td><td><a href="decode.html#arena">Decode</a></td></tr>
+        <tr class="group-row"><th scope="rowgroup" colspan="3">Foundation</th></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/header.ts">header.ts</a></th><td>The wire vocabulary: <code>Major</code>, <code>MajorBits</code>, <code>Info</code> and <code>Token</code> const enums, plus argument read and write.</td><td><a href="principles.html#wire-constants">Principles</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/binary.ts">binary.ts</a></th><td>The <code>Binary</code> view descriptor, bounds checks, the typed-array kind lookup and the endianness constant.</td><td><a href="decode.html#front-door">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/writer.ts">writer.ts</a></th><td>The <code>Writer</code> cursor record (growable or fixed) and <code>EncodeProfile</code>.</td><td><a href="encode.html#writer-cursor">Encode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">state.ts</a></th><td><code>DecodeState</code>, the explicit per-decode state record, and its limits.</td><td><a href="decode.html#create-state">Decode</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/error.ts">error.ts</a></th><td>Error codes, <code>CborError</code> (the only class) and <code>Result</code>.</td><td><a href="correctness.html#errors">Correctness</a></td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/src/types.ts">types.ts</a></th><td>The value and option types.</td><td><a href="principles.html#allocation-policy">Principles</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+    <nav class="pager" aria-label="Previous and next page"><a class="pager-previous" href="correctness.html"><span class="pager-direction">Previous</span><span class="pager-title">Correctness</span></a></nav>
+  </main>
+  <aside class="toc-aside" aria-label="On this page"><p class="toc-title">On this page</p><div data-toc></div></aside>
+</div>
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p>pure-cbor is MIT licensed. Code excerpts are copied from <a href="https://github.com/davidgtonge/pure-cbor/tree/main/src">src/</a>; numbers come from <a href="https://github.com/davidgtonge/pure-cbor/blob/main/BENCHMARK.md">BENCHMARK.md</a> and <a href="https://github.com/davidgtonge/pure-cbor/blob/main/README.md">README.md</a>.</p>
+    <p><a href="https://www.npmjs.com/package/pure-cbor">npm</a> · <a href="https://github.com/davidgtonge/pure-cbor">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pure-cbor: a guided tour of a fast, functional CBOR codec</title>
+<meta name="description" content="A guided tour of pure-cbor, a CBOR (RFC 8949) codec in strict TypeScript: its principles, and how data flows through it on encode and decode.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%231f55b8'/%3E%3Crect x='7' y='9' width='5' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='14' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='19' y='9' width='3' height='14' rx='1.5' fill='%23fff'/%3E%3Crect x='24' y='9' width='2' height='14' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/site.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><rect class="brand-mark-frame" x="1" y="1" width="30" height="30" rx="8"/><rect class="brand-mark-bits" x="7" y="9" width="5" height="14" rx="1.5"/><rect class="brand-mark-bits" x="14" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="19" y="9" width="3" height="14" rx="1.5" opacity=".75"/><rect class="brand-mark-bits" x="24" y="9" width="2" height="14" rx="1" opacity=".75"/></svg><span>pure-cbor</span></a>
+    <nav class="site-nav" aria-label="Site">
+      <ul>
+        <li><a href="index.html" aria-current="page">Overview</a></li>
+        <li><a href="principles.html">Principles</a></li>
+        <li><a href="encode.html">Encode</a></li>
+        <li><a href="decode.html">Decode</a></li>
+        <li><a href="streaming.html">Streaming</a></li>
+        <li><a href="performance.html">Performance</a></li>
+        <li><a href="correctness.html">Correctness</a></li>
+        <li><a href="modules.html">Module map</a></li>
+      </ul>
+    </nav>
+    <a class="header-github" href="https://github.com/davidgtonge/pure-cbor"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+  </div>
+</header>
+<div class="page">
+  <main id="content" class="article">
+<header class="page-intro hero">
+  <p class="eyebrow">pure-cbor · CBOR for JavaScript and TypeScript</p>
+  <h1>A guided tour of a small, fast CBOR codec</h1>
+  <p class="lede">pure-cbor implements CBOR (RFC 8949) in about 2,800 lines of strict TypeScript, with no runtime dependencies. This site walks through the code itself: the principles it follows, and the path a value takes on its way to bytes and back.</p>
+  <ul class="badges" aria-label="Facts">
+    <li>npm: <code>pure-cbor</code></li>
+    <li>Plain ESM with TypeScript declarations</li>
+    <li>No Node APIs, no generated code (CSP-safe)</li>
+    <li>MIT licence</li>
+  </ul>
+</header>
+<details class="toc-mobile"><summary>On this page</summary><div data-toc></div></details>
+
+<section aria-labelledby="promises">
+  <h2 id="promises">Two promises</h2>
+  <div class="promises">
+    <div class="card">
+      <span class="card-number" aria-hidden="true">1</span>
+      <h3>Clean, functional code</h3>
+      <p>Pure functions over explicit state, in the spirit of OCaml. There are no classes apart from the error type, and no state kept between calls apart from a documented cache of decoded map keys. Tagged values and simple values are immutable variants, and the wire format is described by one named set of constants.</p>
+    </div>
+    <div class="card">
+      <span class="card-number" aria-hidden="true">2</span>
+      <h3>The fastest standard CBOR library for JavaScript</h3>
+      <p>Pure JavaScript, with no native addon. On public benchmark data it decodes 1.16–1.71× faster than cbor-x, the next fastest library measured, and encodes level with it up to 1.50× faster. Small messages decoded from a fresh buffer are 5–12× faster.</p>
+    </div>
+  </div>
+  <p>It covers the whole RFC 8949 data model (tags, bignums, dates, <code>Map</code>, simple values, typed arrays), deterministic encoding, CBOR sequences over Web Streams, and COSE, CWT, WebAuthn and mdoc messages, which are checked against their published test vectors. It is standard CBOR only: there is no private wire format.</p>
+</section>
+
+<section aria-labelledby="quick-start">
+  <h2 id="quick-start">Quick start</h2>
+  <figure class="code"><figcaption><span>Terminal</span></figcaption><pre><code class="language-sh">npm install pure-cbor</code></pre></figure>
+  <figure class="code"><figcaption><span>From the README</span></figcaption><pre><code class="language-ts">import { encode, decode } from 'pure-cbor';
+
+const bytes = encode({ id: 7, name: 'Ada', tags: ['x', 'y'], active: true, manager: null });
+console.log(decode(bytes)); // { id: 7, name: 'Ada', tags: ['x', 'y'], active: true, manager: null }
+console.log(decode(encode(new Float64Array([1.25, -0, Math.PI])))); // Float64Array</code></pre></figure>
+  <p><code>encode</code> returns an exactly sized <code>Uint8Array</code> that you own. <code>decode</code> reads exactly one item and rejects trailing bytes. It needs only ES2023 and <code>TextEncoder</code>/<code>TextDecoder</code>, and is tested on Node 22, 24 and 26 and on Deno. It should also run in Bun, browsers and workers, but those aren't tested yet.</p>
+</section>
+
+<section aria-labelledby="headline-numbers">
+  <h2 id="headline-numbers">Headline numbers</h2>
+  <p>The benchmark suite runs each workload in its own Node process, because workloads sharing a process skewed each other's V8 type feedback by up to 2×. The chart shows the five public corpus workloads. Hover over or focus a bar for the underlying times.</p>
+<figure class="chart" aria-describedby="headline-chart-source">
+  <div class="chart-header">
+    <div>
+      <p class="chart-title" id="headline-chart-title">On public data, pure-cbor is ahead in every corpus measurement</p>
+      <p class="chart-subtitle" id="headline-chart-subtitle">Decode (reused input) and encode (owned output), five public corpus workloads</p>
+    </div>
+    <ul class="legend" aria-label="Legend">
+      <li><span class="legend-swatch series-1" aria-hidden="true"></span>Decode</li>
+      <li><span class="legend-swatch series-2" aria-hidden="true"></span>Encode</li>
+    </ul>
+  </div>
+  <div class="chart-body"><div class="chart-wide"><svg viewBox="0 0 640 318" role="group" aria-labelledby="headline-chart-title headline-chart-subtitle"><rect class="chart-noise" x="356.0" y="4" width="40.0" height="274"/><line class="chart-grid" x1="176.0" x2="176.0" y1="4" y2="278"/><text class="chart-axis-text" x="176.0" y="293" text-anchor="middle">0.0×</text><line class="chart-grid" x1="276.0" x2="276.0" y1="4" y2="278"/><text class="chart-axis-text" x="276.0" y="293" text-anchor="middle">0.5×</text><line class="chart-grid" x1="376.0" x2="376.0" y1="4" y2="278"/><text class="chart-axis-text" x="376.0" y="293" text-anchor="middle">1.0×</text><line class="chart-grid" x1="476.0" x2="476.0" y1="4" y2="278"/><text class="chart-axis-text" x="476.0" y="293" text-anchor="middle">1.5×</text><line class="chart-grid" x1="576.0" x2="576.0" y1="4" y2="278"/><text class="chart-axis-text" x="576.0" y="293" text-anchor="middle">2.0×</text><text class="chart-category" x="164" y="36" text-anchor="end">cbor-x example4</text><g class="chart-mark" tabindex="0" role="img" aria-label="cbor-x example4, decode: pure-cbor 19.4 µs, cbor-x 22.4 µs, cborg 40.4 µs. 1.16× the faster of cbor-x and cborg." data-tooltip="cbor-x example4, decode: pure-cbor 19.4 µs, cbor-x 22.4 µs, cborg 40.4 µs. 1.16× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="16.0" width="276.0" height="17"/><path class="chart-bar-1" d="M176.0 17.0h228.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-228.0z"/><text class="chart-value" x="414.0" y="28.5">1.16×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="cbor-x example4, encode: pure-cbor 16.7 µs, cbor-x 17.3 µs, cborg 50.0 µs. 1.04× the faster of cbor-x and cborg." data-tooltip="cbor-x example4, encode: pure-cbor 16.7 µs, cbor-x 17.3 µs, cborg 50.0 µs. 1.04× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="33.0" width="252.0" height="17"/><path class="chart-bar-2" d="M176.0 34.0h204.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-204.0z"/><text class="chart-value" x="390.0" y="45.5">1.04×</text></g><text class="chart-category" x="164" y="90" text-anchor="end">msgpack sample-large</text><g class="chart-mark" tabindex="0" role="img" aria-label="msgpack sample-large, decode: pure-cbor 12.0 µs, cbor-x 20.5 µs, cborg 27.8 µs. 1.71× the faster of cbor-x and cborg." data-tooltip="msgpack sample-large, decode: pure-cbor 12.0 µs, cbor-x 20.5 µs, cborg 27.8 µs. 1.71× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="70.0" width="386.0" height="17"/><path class="chart-bar-1" d="M176.0 71.0h338.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-338.0z"/><text class="chart-value" x="524.0" y="82.5">1.71×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="msgpack sample-large, encode: pure-cbor 12.0 µs, cbor-x 14.8 µs, cborg 21.2 µs. 1.24× the faster of cbor-x and cborg." data-tooltip="msgpack sample-large, encode: pure-cbor 12.0 µs, cbor-x 14.8 µs, cborg 21.2 µs. 1.24× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="87.0" width="292.0" height="17"/><path class="chart-bar-2" d="M176.0 88.0h244.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-244.0z"/><text class="chart-value" x="430.0" y="99.5">1.24×</text></g><text class="chart-category" x="164" y="144" text-anchor="end">Bluesky records 100</text><g class="chart-mark" tabindex="0" role="img" aria-label="Bluesky records 100, decode: pure-cbor 46.6 µs, cbor-x 71.2 µs, cborg 86.2 µs. 1.53× the faster of cbor-x and cborg." data-tooltip="Bluesky records 100, decode: pure-cbor 46.6 µs, cbor-x 71.2 µs, cborg 86.2 µs. 1.53× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="124.0" width="350.0" height="17"/><path class="chart-bar-1" d="M176.0 125.0h302.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-302.0z"/><text class="chart-value" x="488.0" y="136.5">1.53×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="Bluesky records 100, encode: pure-cbor 47.3 µs, cbor-x 56.5 µs, cborg 66.7 µs. 1.20× the faster of cbor-x and cborg." data-tooltip="Bluesky records 100, encode: pure-cbor 47.3 µs, cbor-x 56.5 µs, cborg 66.7 µs. 1.20× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="141.0" width="284.0" height="17"/><path class="chart-bar-2" d="M176.0 142.0h236.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-236.0z"/><text class="chart-value" x="422.0" y="153.5">1.20×</text></g><text class="chart-category" x="164" y="198" text-anchor="end">Float mesh 1000</text><g class="chart-mark" tabindex="0" role="img" aria-label="Float mesh 1000, decode: pure-cbor 183.7 µs, cbor-x 301.3 µs, cborg 845.3 µs. 1.64× the faster of cbor-x and cborg." data-tooltip="Float mesh 1000, decode: pure-cbor 183.7 µs, cbor-x 301.3 µs, cborg 845.3 µs. 1.64× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="178.0" width="372.0" height="17"/><path class="chart-bar-1" d="M176.0 179.0h324.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-324.0z"/><text class="chart-value" x="510.0" y="190.5">1.64×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="Float mesh 1000, encode: pure-cbor 214.8 µs, cbor-x 228.7 µs, cborg 2306.8 µs. 1.06× the faster of cbor-x and cborg." data-tooltip="Float mesh 1000, encode: pure-cbor 214.8 µs, cbor-x 228.7 µs, cborg 2306.8 µs. 1.06× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="195.0" width="256.0" height="17"/><path class="chart-bar-2" d="M176.0 196.0h208.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-208.0z"/><text class="chart-value" x="394.0" y="207.5">1.06×</text></g><text class="chart-category" x="164" y="252" text-anchor="end">float[] 10000</text><g class="chart-mark" tabindex="0" role="img" aria-label="float[] 10000, decode: pure-cbor 34.0 µs, cbor-x 51.7 µs, cborg 454.3 µs. 1.52× the faster of cbor-x and cborg." data-tooltip="float[] 10000, decode: pure-cbor 34.0 µs, cbor-x 51.7 µs, cborg 454.3 µs. 1.52× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="232.0" width="348.0" height="17"/><path class="chart-bar-1" d="M176.0 233.0h300.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-300.0z"/><text class="chart-value" x="486.0" y="244.5">1.52×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="float[] 10000, encode: pure-cbor 74.3 µs, cbor-x 111.5 µs, cborg 1566.1 µs. 1.50× the faster of cbor-x and cborg." data-tooltip="float[] 10000, encode: pure-cbor 74.3 µs, cbor-x 111.5 µs, cborg 1566.1 µs. 1.50× the faster of cbor-x and cborg."><rect class="chart-hit" x="176" y="249.0" width="344.0" height="17"/><path class="chart-bar-2" d="M176.0 250.0h296.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-296.0z"/><text class="chart-value" x="482.0" y="261.5">1.50×</text></g><line class="chart-baseline" x1="376.0" x2="376.0" y1="4" y2="278"/><text class="chart-axis-text" x="376.0" y="312" text-anchor="middle">Speed relative to the faster of cbor-x and cborg (1.0× = level; shaded band = ±10% noise)</text></svg></div><div class="chart-narrow"><svg viewBox="0 0 360 360" role="group" aria-labelledby="headline-chart-title headline-chart-subtitle"><rect class="chart-noise" x="130.0" y="6" width="28.0" height="310"/><line class="chart-grid" x1="4.0" x2="4.0" y1="6" y2="316"/><text class="chart-axis-text" x="4.0" y="331" text-anchor="start">0.0×</text><line class="chart-grid" x1="144.0" x2="144.0" y1="6" y2="316"/><text class="chart-axis-text" x="144.0" y="331" text-anchor="middle">1.0×</text><line class="chart-grid" x1="284.0" x2="284.0" y1="6" y2="316"/><text class="chart-axis-text" x="284.0" y="331" text-anchor="middle">2.0×</text><text class="chart-category" x="4" y="22">cbor-x example4</text><g class="chart-mark" tabindex="0" role="img" aria-label="cbor-x example4, decode: pure-cbor 19.4 µs, cbor-x 22.4 µs, cborg 40.4 µs. 1.16× the faster of cbor-x and cborg." data-tooltip="cbor-x example4, decode: pure-cbor 19.4 µs, cbor-x 22.4 µs, cborg 40.4 µs. 1.16× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="27.0" width="202.4" height="17"/><path class="chart-bar-1" d="M4.0 28.0h158.4a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-158.4z"/><text class="chart-value" x="172.4" y="39.5">1.16×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="cbor-x example4, encode: pure-cbor 16.7 µs, cbor-x 17.3 µs, cborg 50.0 µs. 1.04× the faster of cbor-x and cborg." data-tooltip="cbor-x example4, encode: pure-cbor 16.7 µs, cbor-x 17.3 µs, cborg 50.0 µs. 1.04× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="44.0" width="185.6" height="17"/><path class="chart-bar-2" d="M4.0 45.0h141.6a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-141.6z"/><text class="chart-value" x="155.6" y="56.5">1.04×</text></g><text class="chart-category" x="4" y="84">msgpack sample-large</text><g class="chart-mark" tabindex="0" role="img" aria-label="msgpack sample-large, decode: pure-cbor 12.0 µs, cbor-x 20.5 µs, cborg 27.8 µs. 1.71× the faster of cbor-x and cborg." data-tooltip="msgpack sample-large, decode: pure-cbor 12.0 µs, cbor-x 20.5 µs, cborg 27.8 µs. 1.71× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="89.0" width="279.4" height="17"/><path class="chart-bar-1" d="M4.0 90.0h235.4a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-235.4z"/><text class="chart-value" x="249.4" y="101.5">1.71×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="msgpack sample-large, encode: pure-cbor 12.0 µs, cbor-x 14.8 µs, cborg 21.2 µs. 1.24× the faster of cbor-x and cborg." data-tooltip="msgpack sample-large, encode: pure-cbor 12.0 µs, cbor-x 14.8 µs, cborg 21.2 µs. 1.24× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="106.0" width="213.6" height="17"/><path class="chart-bar-2" d="M4.0 107.0h169.6a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-169.6z"/><text class="chart-value" x="183.6" y="118.5">1.24×</text></g><text class="chart-category" x="4" y="146">Bluesky records 100</text><g class="chart-mark" tabindex="0" role="img" aria-label="Bluesky records 100, decode: pure-cbor 46.6 µs, cbor-x 71.2 µs, cborg 86.2 µs. 1.53× the faster of cbor-x and cborg." data-tooltip="Bluesky records 100, decode: pure-cbor 46.6 µs, cbor-x 71.2 µs, cborg 86.2 µs. 1.53× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="151.0" width="254.2" height="17"/><path class="chart-bar-1" d="M4.0 152.0h210.2a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-210.2z"/><text class="chart-value" x="224.2" y="163.5">1.53×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="Bluesky records 100, encode: pure-cbor 47.3 µs, cbor-x 56.5 µs, cborg 66.7 µs. 1.20× the faster of cbor-x and cborg." data-tooltip="Bluesky records 100, encode: pure-cbor 47.3 µs, cbor-x 56.5 µs, cborg 66.7 µs. 1.20× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="168.0" width="208.0" height="17"/><path class="chart-bar-2" d="M4.0 169.0h164.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-164.0z"/><text class="chart-value" x="178.0" y="180.5">1.20×</text></g><text class="chart-category" x="4" y="208">Float mesh 1000</text><g class="chart-mark" tabindex="0" role="img" aria-label="Float mesh 1000, decode: pure-cbor 183.7 µs, cbor-x 301.3 µs, cborg 845.3 µs. 1.64× the faster of cbor-x and cborg." data-tooltip="Float mesh 1000, decode: pure-cbor 183.7 µs, cbor-x 301.3 µs, cborg 845.3 µs. 1.64× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="213.0" width="269.6" height="17"/><path class="chart-bar-1" d="M4.0 214.0h225.6a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-225.6z"/><text class="chart-value" x="239.6" y="225.5">1.64×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="Float mesh 1000, encode: pure-cbor 214.8 µs, cbor-x 228.7 µs, cborg 2306.8 µs. 1.06× the faster of cbor-x and cborg." data-tooltip="Float mesh 1000, encode: pure-cbor 214.8 µs, cbor-x 228.7 µs, cborg 2306.8 µs. 1.06× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="230.0" width="188.4" height="17"/><path class="chart-bar-2" d="M4.0 231.0h144.4a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-144.4z"/><text class="chart-value" x="158.4" y="242.5">1.06×</text></g><text class="chart-category" x="4" y="270">float[] 10000</text><g class="chart-mark" tabindex="0" role="img" aria-label="float[] 10000, decode: pure-cbor 34.0 µs, cbor-x 51.7 µs, cborg 454.3 µs. 1.52× the faster of cbor-x and cborg." data-tooltip="float[] 10000, decode: pure-cbor 34.0 µs, cbor-x 51.7 µs, cborg 454.3 µs. 1.52× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="275.0" width="252.8" height="17"/><path class="chart-bar-1" d="M4.0 276.0h208.8a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-208.8z"/><text class="chart-value" x="222.8" y="287.5">1.52×</text></g><g class="chart-mark" tabindex="0" role="img" aria-label="float[] 10000, encode: pure-cbor 74.3 µs, cbor-x 111.5 µs, cborg 1566.1 µs. 1.50× the faster of cbor-x and cborg." data-tooltip="float[] 10000, encode: pure-cbor 74.3 µs, cbor-x 111.5 µs, cborg 1566.1 µs. 1.50× the faster of cbor-x and cborg."><rect class="chart-hit" x="4" y="292.0" width="250.0" height="17"/><path class="chart-bar-2" d="M4.0 293.0h206.0a4 4 0 0 1 4 4v7.0a4 4 0 0 1 -4 4h-206.0z"/><text class="chart-value" x="220.0" y="304.5">1.50×</text></g><line class="chart-baseline" x1="144.0" x2="144.0" y1="6" y2="316"/><text class="chart-axis-text" x="4" y="350">1.0× = level with the faster of cbor-x and cborg</text></svg></div></div>
+  <details>
+    <summary>Show the numbers as a table</summary>
+    <div class="table-wrap"><table><thead><tr><th scope="col">Corpus workload</th><th scope="col" class="number">Decode: pure-cbor</th><th scope="col" class="number">cbor-x</th><th scope="col" class="number">cborg</th><th scope="col" class="number">vs best</th><th scope="col" class="number">Encode: pure-cbor</th><th scope="col" class="number">cbor-x</th><th scope="col" class="number">cborg</th><th scope="col" class="number">vs best</th></tr></thead><tbody><tr><th scope="row">cbor-x example4</th><td class="number">19.4 µs</td><td class="number">22.4 µs</td><td class="number">40.4 µs</td><td class="number">1.16×</td><td class="number">16.7 µs</td><td class="number">17.3 µs</td><td class="number">50.0 µs</td><td class="number">1.04×</td></tr><tr><th scope="row">msgpack sample-large</th><td class="number">12.0 µs</td><td class="number">20.5 µs</td><td class="number">27.8 µs</td><td class="number">1.71×</td><td class="number">12.0 µs</td><td class="number">14.8 µs</td><td class="number">21.2 µs</td><td class="number">1.24×</td></tr><tr><th scope="row">Bluesky records 100</th><td class="number">46.6 µs</td><td class="number">71.2 µs</td><td class="number">86.2 µs</td><td class="number">1.53×</td><td class="number">47.3 µs</td><td class="number">56.5 µs</td><td class="number">66.7 µs</td><td class="number">1.20×</td></tr><tr><th scope="row">Float mesh 1000</th><td class="number">183.7 µs</td><td class="number">301.3 µs</td><td class="number">845.3 µs</td><td class="number">1.64×</td><td class="number">214.8 µs</td><td class="number">228.7 µs</td><td class="number">2306.8 µs</td><td class="number">1.06×</td></tr><tr><th scope="row">float[] 10000</th><td class="number">34.0 µs</td><td class="number">51.7 µs</td><td class="number">454.3 µs</td><td class="number">1.52×</td><td class="number">74.3 µs</td><td class="number">111.5 µs</td><td class="number">1566.1 µs</td><td class="number">1.50×</td></tr></tbody></table></div>
+  </details>
+  <figcaption class="source-note" id="headline-chart-source">From BENCHMARK.md: Node v22.19.0, macOS arm64, pure-cbor 0.5.0, cbor-x in pure-JS standard mode, cborg with default options. Each workload in its own process, median of 5 × 80 ms rounds. Each library decodes its own encoding of the same value.</figcaption>
+</figure>
+
+  <div class="callout honest">
+    <p class="callout-title">Where it is not ahead</p>
+    <p>BENCHMARK.md says to treat anything within about ±10% of 1.0 as level. Outside the corpus:</p>
+    <ul>
+      <li><strong>Arrays of short strings, decoded</strong>: 0.92–0.97× cbor-x. The time goes on allocating many tiny strings, which every library pays.</li>
+      <li><strong>Long text from a reused buffer</strong> (ASCII 4096): about 0.9×. pure-cbor's <code>TextDecoder</code> is strict and rejects invalid UTF-8; cbor-x's replaces it. With fresh input they are level.</li>
+      <li><strong>Encoding 64-byte strings</strong>: cborg is 8% faster (0.92×). Mixed arrays and the nested config object are level within noise.</li>
+      <li><strong>COSE and WebAuthn</strong>: pure-cbor copies byte strings by default, while cbor-x returns views into the input. It matches cbor-x only with <code>binaryOwnership: 'borrow'</code>.</li>
+      <li><strong>cbor-x records mode</strong>, a non-standard wire format, decodes 100 rows about 2.6× faster than pure-cbor by generating readers with <code>new Function</code>. pure-cbor stays standard CBOR and avoids code generation.</li>
+    </ul>
+    <p>The full tables, including fresh-input decoding and streaming, are on the <a href="performance.html">performance page</a>.</p>
+  </div>
+</section>
+
+<section aria-labelledby="the-tour">
+  <h2 id="the-tour">The tour</h2>
+  <p>Each page quotes the code it describes, copied from <code>src/</code> and linked to GitHub. Read them in order, or jump to the part you care about.</p>
+  <ul class="tour">
+    <li><a href="principles.html"><span class="tour-title">Core principles</span><span class="tour-text">Explicit state, options that choose functions, allocation as policy, named wire constants, readable hot loops, measured performance.</span></a></li>
+    <li><a href="encode.html"><span class="tour-title">Encode, step by step</span><span class="tour-text">From <code>encode(value)</code> through the staging buffer, <code>writerFor</code> and <code>writeValue</code>, to one copy out.</span></a></li>
+    <li><a href="decode.html"><span class="tour-title">Decode, step by step</span><span class="tour-text">From <code>decode(bytes)</code> through <code>readItem</code>, <code>DecodeState</code> and <code>readValue</code>, with the key cache and the arena.</span></a></li>
+    <li><a href="streaming.html"><span class="tour-title">Streaming</span><span class="tour-text">CBOR sequences split across chunks: the boundary scanner, the assembly buffer and the Web Streams adapters.</span></a></li>
+    <li><a href="performance.html"><span class="tour-title">Performance notes</span><span class="tour-text">Why each trick exists, and the measured effect the docs record for it.</span></a></li>
+    <li><a href="correctness.html"><span class="tour-title">Correctness</span><span class="tour-text">RFC 8949 Appendix A, COSE, WebAuthn and mdoc vectors, differential tests and hostile input.</span></a></li>
+    <li><a href="modules.html"><span class="tour-title">Module map</span><span class="tour-text">Every file in <code>src/</code>, its role, and how the modules depend on each other.</span></a></li>
+  </ul>
+</section>
+
+    <nav class="pager" aria-label="Previous and next page"><a class="pager-next" href="principles.html"><span class="pager-direction">Next</span><span class="pager-title">Core principles</span></a></nav>
+  </main>
+  <aside class="toc-aside" aria-label="On this page"><p class="toc-title">On this page</p><div data-toc></div></aside>
+</div>
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p>pure-cbor is MIT licensed. Code excerpts are copied from <a href="https://github.com/davidgtonge/pure-cbor/tree/main/src">src/</a>; numbers come from <a href="https://github.com/davidgtonge/pure-cbor/blob/main/BENCHMARK.md">BENCHMARK.md</a> and <a href="https://github.com/davidgtonge/pure-cbor/blob/main/README.md">README.md</a>.</p>
+    <p><a href="https://www.npmjs.com/package/pure-cbor">npm</a> · <a href="https://github.com/davidgtonge/pure-cbor">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>

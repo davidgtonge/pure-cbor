@@ -25,7 +25,8 @@ const SCAN_AHEAD_BYTES = 1024;
 
 export interface SequenceDecodeOptions extends DecodeOptions {
   /** Largest encoded size of one item. Bounds the bytes buffered for an item
-   * that spans chunks; checked from headers before the bytes arrive.
+   * that spans chunks; for those it is checked from headers before the bytes
+   * arrive. An item already whole within one chunk is checked after decoding.
    * Default 16 MiB. */
   readonly maxItemBytes?: number;
 }

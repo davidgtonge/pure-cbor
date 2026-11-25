@@ -148,6 +148,8 @@ Treat anything within about ±10% of 1.0 as level. A whole run can also shift wh
 - **Encoding 64-byte strings:** cborg is 8% faster (0.92×). At that size every library pays one off-heap allocation for the output, which dominates.
 - **cbor-x records mode** is not in the tables: it's a non-standard wire format both ends must speak. Measured separately, it decodes 100 rows in about 8.6 µs (2.6× faster than pure-cbor) and halves the bytes. It does that by generating object readers with `new Function`. pure-cbor stays standard CBOR and avoids code generation.
 
+**The other CBOR libraries.** A full run against all six (cbor-x, cborg, tiny-cbor, node-cbor, cbor2 and cbor-js; `npm run bench:isolated` with them installed) was made on a loaded machine, so its absolute times aren't published here. On the public corpus, pure-cbor was ahead of or level with every one of them: cbor-x was the fastest of the others on every corpus decode, and cbor-x or cbor2 on corpus encode.
+
 **cborg** is slower across the board here. Part of that is its defaults: it sorts every map's keys and finds the smallest exact float width for every number. Those choices give deterministic, compact output, which pure-cbor and cbor-x don't attempt. For float-heavy data the cost is large: 10–20× slower encoding.
 
 ## Streaming
@@ -259,7 +261,7 @@ The table above was measured on 0.5.0. In 0.6.0 the default mode copies byte str
 
 ## Where the wins come from
 
-- **Fresh inputs and small owned outputs: no DataView.** In V8, building a DataView on a small fresh buffer moves it off-heap (~0.5 µs). That's most of the time cbor-x and cborg spend on small fresh messages.
+- **Fresh inputs and small owned outputs: no DataView.** In V8, building a DataView on a small fresh buffer moves it off-heap (~900 ns per message). That's most of the time cbor-x and cborg spend on small fresh messages.
 - **Objects:**
   - allocation-free `for…in` enumeration;
   - a single-pass map writer that patches the preferred header at the end;
@@ -275,7 +277,7 @@ pure-cbor writes preferred (smallest) map headers. cbor-x's standard encoder alw
 
 ## Correctness status
 
-84 tests pass with the comparison libraries installed:
+85 tests pass with the comparison libraries installed:
 
 - **Real-world vectors:**
   - all 63 COSE working-group examples decode and re-encode byte for byte, and 31 rebuilt `Sig_structure`/`MAC_structure`s match the signed bytes exactly;
