@@ -1,5 +1,6 @@
-// pure-cbor documentation site: syntax highlighting, the table of contents,
-// and chart tooltips. Plain script, no dependencies; the pages read fine
+// pure-cbor documentation site: syntax highlighting, the chapter and step
+// tracking, the scroll-linked trace panels and chart tooltips. Plain script,
+// no dependencies; the page reads fine
 // without it.
 
 (function () {
@@ -91,60 +92,148 @@
     }
   }
 
-  // ---------------------------------------------------------------- table of contents
+  // ---------------------------------------------------------------- scroll position: chapters, steps, progress
 
-  function buildTocList(headings) {
-    const list = document.createElement('ol');
-    list.className = 'toc-list';
-    for (const heading of headings) {
-      const item = document.createElement('li');
-      const link = document.createElement('a');
-      link.href = '#' + heading.id;
-      link.textContent = heading.dataset.tocLabel || heading.textContent;
-      item.appendChild(link);
-      list.appendChild(item);
+  // The last element whose top has passed the reading line, or the first one.
+  function currentByTop(elements, readingLine) {
+    let current = elements[0];
+    for (const element of elements) {
+      if (element.getBoundingClientRect().top <= readingLine) current = element;
+      else break;
     }
-    return list;
+    return current;
   }
 
-  function highlightCurrentSection(headings, tocLinks) {
-    let currentIndex = 0;
-    const threshold = window.innerHeight * 0.3;
-    headings.forEach(function (heading, headingIndex) {
-      if (heading.getBoundingClientRect().top < threshold) currentIndex = headingIndex;
-    });
-    tocLinks.forEach(function (link) {
-      const isCurrent = link.getAttribute('href') === '#' + headings[currentIndex].id;
-      if (isCurrent) link.setAttribute('aria-current', 'true');
+  function setCurrent(links, isCurrent) {
+    for (const link of links) {
+      if (isCurrent(link)) link.setAttribute('aria-current', 'true');
       else link.removeAttribute('aria-current');
-    });
+    }
   }
 
-  function buildTableOfContents() {
-    const headings = Array.from(document.querySelectorAll('.article h2[id]'));
-    const containers = document.querySelectorAll('[data-toc]');
-    if (headings.length === 0 || containers.length === 0) {
-      for (const container of document.querySelectorAll('.toc-mobile, .toc-aside')) container.hidden = true;
-      return;
-    }
-    for (const container of containers) container.appendChild(buildTocList(headings));
-    const asideLinks = Array.from(document.querySelectorAll('.toc-aside .toc-list a'));
-    let scheduled = false;
+  function trackChapters() {
+    const chapters = Array.from(document.querySelectorAll('.chapter[id]'));
+    const headings = Array.from(document.querySelectorAll('.chapter h3[id]'));
+    const navLinks = Array.from(document.querySelectorAll('.chapter-nav a'));
+    const tocChapters = Array.from(document.querySelectorAll('.toc-chapters > li'));
+    const tocStepLinks = Array.from(document.querySelectorAll('.toc-steps a'));
+    const progress = document.querySelector('.reading-progress');
+    if (chapters.length === 0) return;
+
     const update = function () {
-      scheduled = false;
-      highlightCurrentSection(headings, asideLinks);
-    };
-    window.addEventListener('scroll', function () {
-      if (!scheduled) {
-        scheduled = true;
-        window.requestAnimationFrame(update);
+      const readingLine = window.innerHeight * 0.35;
+      const chapter = currentByTop(chapters, readingLine);
+      const chapterHash = '#' + chapter.id;
+      setCurrent(navLinks, function (link) { return link.getAttribute('href') === chapterHash; });
+      for (const item of tocChapters) item.classList.toggle('is-current', item.dataset.chapter === chapter.id);
+      const headingsInChapter = headings.filter(function (heading) { return chapter.contains(heading); });
+      const heading = headingsInChapter.length > 0 && headingsInChapter[0].getBoundingClientRect().top <= readingLine
+        ? currentByTop(headingsInChapter, readingLine)
+        : null;
+      setCurrent(tocStepLinks, function (link) { return heading !== null && link.getAttribute('href') === '#' + heading.id; });
+      if (progress) {
+        const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+        progress.style.setProperty('--progress', scrollable > 0 ? String(Math.min(1, window.scrollY / scrollable)) : '0');
       }
-    }, { passive: true });
+    };
+    onScrollFrame(update);
+  }
+
+  function onScrollFrame(update) {
+    let scheduled = false;
+    const schedule = function () {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(function () {
+        scheduled = false;
+        update();
+      });
+    };
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
     update();
-    // Close the mobile contents after choosing a section.
-    for (const mobileLink of document.querySelectorAll('.toc-mobile a')) {
-      mobileLink.addEventListener('click', function () {
-        mobileLink.closest('details').open = false;
+  }
+
+  // ---------------------------------------------------------------- the trace panels beside encode and decode
+
+  // "1-3 5" -> [1, 2, 3, 5]
+  function parseByteRanges(text) {
+    const indexes = [];
+    for (const range of (text || '').split(/\s+/).filter(Boolean)) {
+      const [first, last] = range.split('-').map(Number);
+      for (let index = first; index <= (last === undefined ? first : last); index++) indexes.push(index);
+    }
+    return indexes;
+  }
+
+  function buildTraceBytes(container) {
+    const hexBytes = container.dataset.traceBytes.split(' ');
+    const byteCells = [];
+    const groups = [];
+    for (const groupSpec of container.dataset.traceGroups.split('|')) {
+      const separator = groupSpec.indexOf(':');
+      const indexes = parseByteRanges(groupSpec.slice(0, separator));
+      const group = document.createElement('span');
+      group.className = 'trace-group';
+      const bytesRow = document.createElement('span');
+      bytesRow.className = 'trace-group-bytes';
+      for (const index of indexes) {
+        const cell = document.createElement('span');
+        cell.className = 'trace-byte';
+        cell.textContent = hexBytes[index];
+        byteCells[index] = cell;
+        bytesRow.appendChild(cell);
+      }
+      const label = document.createElement('span');
+      label.className = 'trace-group-label';
+      label.textContent = groupSpec.slice(separator + 1);
+      group.append(bytesRow, label);
+      container.appendChild(group);
+      groups.push({ element: group, indexes: indexes });
+    }
+    return { byteCells: byteCells, groups: groups };
+  }
+
+  function showStep(trace, parts, step) {
+    const activeNodes = new Set((step.dataset.nodes || '').split(/\s+/).filter(Boolean));
+    for (const node of trace.querySelectorAll('[data-node]')) node.classList.toggle('is-active', activeNodes.has(node.dataset.node));
+    const activeBytes = new Set(parseByteRanges(step.dataset.bytes));
+    parts.byteCells.forEach(function (cell, index) { cell.classList.toggle('is-active', activeBytes.has(index)); });
+    for (const group of parts.groups) {
+      group.element.classList.toggle('is-active', group.indexes.some(function (index) { return activeBytes.has(index); }));
+    }
+    const activeOutputs = new Set((step.dataset.out || '').split(/\s+/).filter(Boolean));
+    for (const output of trace.querySelectorAll('[data-out]')) output.classList.toggle('is-active', activeOutputs.has(output.dataset.out));
+    const note = trace.querySelector('[data-trace-note]');
+    if (note) note.textContent = step.dataset.note || '';
+  }
+
+  function setUpScrolly(scrolly) {
+    const steps = Array.from(scrolly.querySelectorAll('.step'));
+    const trace = scrolly.querySelector('[data-trace]');
+    if (steps.length === 0 || !trace) return;
+    const parts = buildTraceBytes(trace.querySelector('[data-trace-bytes]'));
+    let shown = null;
+    onScrollFrame(function () {
+      const step = currentByTop(steps, window.innerHeight * 0.45);
+      if (step === shown) return;
+      if (shown) shown.classList.remove('is-current');
+      step.classList.add('is-current');
+      shown = step;
+      showStep(trace, parts, step);
+    });
+    // Selecting a function in the panel scrolls to the first step about it.
+    for (const node of trace.querySelectorAll('[data-node]')) {
+      const target = steps.find(function (step) { return (step.dataset.nodes || '').split(/\s+/).includes(node.dataset.node); });
+      if (!target) continue;
+      node.setAttribute('role', 'link');
+      node.setAttribute('tabindex', '0');
+      const heading = target.querySelector('h3');
+      node.setAttribute('aria-label', 'Go to: ' + (heading ? heading.textContent : node.textContent));
+      const go = function () { target.scrollIntoView({ block: 'start' }); };
+      node.addEventListener('click', go);
+      node.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); go(); }
       });
     }
   }
@@ -188,7 +277,9 @@
   function start() {
     highlightCodeBlocks();
     makeScrollersFocusable();
-    buildTableOfContents();
+    document.documentElement.classList.add('js');
+    trackChapters();
+    for (const scrolly of document.querySelectorAll('.scrolly')) setUpScrolly(scrolly);
     attachChartTooltips();
   }
 
