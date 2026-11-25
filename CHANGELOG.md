@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Faster encoding of outputs over 64 KiB: the staging buffer is now kept up to 256 KiB between calls. At 64 KiB, every larger output regrew it and copied its first 64 KB again. Measured under the same conditions, a 130 KB float mesh encodes about 4% faster and a 90 KB float array about 19% faster. A process keeps at most 256 KiB for this after a large encode.
+- Docs: cbor-x's optional native addon (installed automatically on Node) decodes text-heavy data up to 1.26× faster than pure-cbor. The README and BENCHMARK.md now say so, with measurements, and the second promise reads "the fastest pure-JavaScript CBOR library". BENCHMARK.md also records three pure-JavaScript attempts at the addon's batching trick, all slower on real data.
 
 ## 1.0.2
 

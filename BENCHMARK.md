@@ -213,6 +213,41 @@ Treat anything within about ±10% of 1.0 as level. A whole run can also shift wh
 - **A large item spanning chunks** costs about 20–25% more than decoding it whole (one copy into an assembly buffer plus a header scan), and still beats cbor-x's stream by 1.4×.
 - **The per-item `decode()` row** pays a fresh allocation per message, so the sequence decoder working through shared 64 KiB chunks is faster than it.
 
+## cbor-x with its native addon
+
+The tables above run cbor-x as pure JavaScript. On Node, npm also installs its optional `cbor-extract` addon (a prebuilt binary), and cbor-x uses it unless `CBOR_NATIVE_ACCELERATION_DISABLED=true`. Browsers, workers and Deno never get it.
+
+**What it does.** It only affects decoding text. On the first text string, one native call scans ahead through the CBOR and creates up to 256 upcoming strings. Runs of nearby ASCII strings become a single string (`napi_create_string_latin1`), and each CBOR string is handed out as a slice of it. Encoding is unaffected.
+
+**Measured.** Decoding one value per operation, each library in its own process, median of 7 rounds; the table is the median of three such runs. Node 22.19, macOS arm64, on battery power; cbor-x 1.6.9, cbor-extract 2.2.3. "pure-cbor vs native" is cbor-x's native time divided by pure-cbor's; above 1 means pure-cbor is faster.
+
+| Decode | pure-cbor | cbor-x, pure JS | cbor-x, native addon | pure-cbor vs native |
+| --- | ---: | ---: | ---: | ---: |
+| 100 Bluesky-style records | 87.5 µs | 134.6 µs | 75.4 µs | 0.86× |
+| msgpack sample-large | 23.7 µs | 40.9 µs | 23.1 µs | 0.98× |
+| cbor-x's benchmark document | 36.9 µs | 44.7 µs | 37.9 µs | 1.03× |
+| 128 short strings | 4.41 µs | 4.16 µs | 3.50 µs | 0.79× |
+| 2 KB of text | 0.47 µs | 0.45 µs | 0.42 µs | 0.89× |
+| 100 object rows | 40.8 µs | 57.6 µs | 56.2 µs | 1.38× |
+
+The addon makes cbor-x 1.02–1.8× faster on these. With it, cbor-x decodes text-heavy data faster than pure-cbor (Bluesky records 1.16×, short-string arrays 1.26×), is level on sample-large, and stays behind on objects with short repeated keys (pure-cbor's key cache) and on numbers and floats, which it doesn't touch.
+
+**Why pure-cbor doesn't do the same in JavaScript.** Three pure-JavaScript versions of the batch were built and measured against the current decoder. Each looked ahead through the CBOR the same way and served strings as slices of one decoded block. Medians of three runs, each version timed alongside the current decoder and cbor-x, so the columns come from separate runs:
+
+| Decode, µs | Current | Packed by a JS loop | Packed with `set()` | One span, no copy | cbor-x native |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 100 Bluesky-style records | 85.7 | 99.2 | 97.9 | 120.3 | 75.3 |
+| msgpack sample-large | 24.0 | 28.0 | 40.0 | 35.4 | 22.8 |
+| cbor-x's benchmark document | 35.6 | 43.2 | 42.9 | 54.2 | 37.7 |
+| 64 strings of 25–64 bytes | 9.4 | 8.1 | 8.0 | 6.5 | 3.3 |
+
+They help only on strings of medium length with nothing awkward between them, and lose on real data, for three reasons:
+- **Every way to turn bytes into a string costs something per string in JavaScript:** a `TextDecoder` call (about 130 ns, at any length up to 128 bytes), a typed-array view to copy from (the top cost in the profile of the `set()` version), or a loop over the bytes. C++ pays none of these.
+- **`TextDecoder('latin1')` is really Windows-1252.** It maps bytes 0x80–0x9F, which CBOR uses for array headers and length bytes, to characters above U+00FF. So a span containing one becomes a two-byte string, and so does every slice of it. The addon uses true ISO-8859-1, which V8 stores one byte per character.
+- **Even one extra call in the array loop's text path costs about 15%** on short-string arrays, by spending V8's inlining budget.
+
+So pure-cbor keeps its per-string paths: 8 bytes at a time in JavaScript up to 32 bytes, where that beats a `TextDecoder` call, and `TextDecoder` above.
+
 ## Real-world flows: WebAuthn, COSE, CWT, mdoc
 
 `npm run bench:cose`. The vectors are public spec examples (see [test/vectors](test/vectors/README.md)):
