@@ -186,16 +186,19 @@ export function writeEntries(writer: Writer, entries: ReadonlyArray<readonly [Va
   }
 }
 
+/** Indexes of the byte arrays in byte order, and whether any two are equal. */
+function sortEncodedKeys(encodedKeys: readonly Uint8Array[]): { readonly order: number[]; readonly hasEqual: boolean } {
+  const order = encodedKeys.map((_, index) => index).toSorted((left, right) => compareBytes(encodedKeys[left], encodedKeys[right]));
+  const hasEqual = order.some((keyIndex, position) => position > 0 && compareBytes(encodedKeys[order[position - 1]], encodedKeys[keyIndex]) === 0);
+  return { order, hasEqual };
+}
+
 /** RFC 8949 §4.2.1: entries ordered by the bytes of their encoded keys.
  * Keys that encode identically are duplicates, which deterministic CBOR forbids. */
 export function writeSortedEntries(writer: Writer, entries: ReadonlyArray<readonly [Value, Value]>, depth: number, writeValue: WriteValue): void {
   const encodedKeys = entries.map(([key]) => encodeKey(key, depth, writeValue));
-  const order = entries.map((_, index) => index).toSorted((left, right) => compareBytes(encodedKeys[left], encodedKeys[right]));
-  for (let index = 1; index < order.length; index++) {
-    if (compareBytes(encodedKeys[order[index - 1]], encodedKeys[order[index]]) === 0) {
-      fail('duplicate-key', writer.position, 'Duplicate map key');
-    }
-  }
+  const { order, hasEqual } = sortEncodedKeys(encodedKeys);
+  if (hasEqual) fail('duplicate-key', writer.position, 'Duplicate map key');
   ensure(writer, 9);
   writer.position = writeArgument(writer.bytes, writer.position, MajorBits.Map, entries.length);
   for (const index of order) {
@@ -257,35 +260,71 @@ function moreEntries(state: DecodeState, index: number, entryCount: number, head
 }
 
 /** A duplicate key overwrites an earlier one, leaving fewer distinct keys
- * than entries. Counting once is ~4x cheaper than checking each key. (For
- * Map, byte-string and other object keys are distinct by identity.) */
+ * than entries. Counting once is ~4x cheaper than checking each key. */
 function checkDuplicates(state: DecodeState, distinctKeys: number, entries: number, headerOffset: number): void {
   if (state.rejectDuplicateKeys && distinctKeys !== entries) fail('duplicate-key', headerOffset, 'Duplicate map key');
 }
 
-function readIntoMap(state: DecodeState, map: Map<Value, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue): Map<Value, Value> {
+/** Up to this many, byte arrays are compared pairwise, with no allocation;
+ * beyond it they are sorted, so a hostile map can't make the check quadratic. */
+const PAIRWISE_LIMIT = 16;
+
+function hasEqualBytes(arrays: readonly Uint8Array[]): boolean {
+  if (arrays.length > PAIRWISE_LIMIT) return sortEncodedKeys(arrays).hasEqual;
+  for (let later = 1; later < arrays.length; later++) {
+    for (let earlier = 0; earlier < later; earlier++) {
+      if (arrays[earlier].length === arrays[later].length && compareBytes(arrays[earlier], arrays[later]) === 0) return true;
+    }
+  }
+  return false;
+}
+
+/** A Map tells primitive keys apart by value but object keys (byte strings,
+ * arrays, maps, tags, dates) only by identity, so two equal byte strings are
+ * two entries. This runs only for maps that have object keys. Byte strings,
+ * the common case, are equal when their bytes are; the rest are compared by
+ * their deterministic encodings, which equal CBOR values share. (Re-encoding
+ * byte-string keys too made decoding such maps ~6x slower.) */
+function checkObjectKeys(state: DecodeState, objectKeys: readonly Value[], headerOffset: number, writeCanonical: WriteValue): void {
+  if (!state.rejectDuplicateKeys || objectKeys.length < 2) return;
+  const byteStrings: Uint8Array[] = [];
+  const otherKeys: Value[] = [];
+  for (const key of objectKeys) {
+    if (key instanceof Uint8Array) byteStrings.push(key);
+    else otherKeys.push(key);
+  }
+  const hasEqual = hasEqualBytes(byteStrings)
+    || (otherKeys.length > 1 && hasEqualBytes(otherKeys.map((key) => encodeKey(key, 0, writeCanonical))));
+  if (hasEqual) fail('duplicate-key', headerOffset, 'Duplicate map key');
+}
+
+function readIntoMap(state: DecodeState, map: Map<Value, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue, writeCanonical: WriteValue): Map<Value, Value> {
   const bytes = state.bytes;
+  let objectKeys: Value[] | undefined;
   for (; moreEntries(state, index, entryCount, headerOffset); index++) {
     readable(bytes, state.position, 1);
     const keyToken = bytes[state.position];
     const key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readValue(state);
+    if (typeof key === 'object' && key !== null) (objectKeys ??= []).push(key);
     map.set(key, readEntryValue(state, readValue));
   }
   checkDuplicates(state, map.size, index, headerOffset);
+  if (objectKeys !== undefined) checkObjectKeys(state, objectKeys, headerOffset, writeCanonical);
   return map;
 }
 
 /** 'auto' mode met a non-text key: move the entries so far into a Map and continue there. */
-function continueAsMap(state: DecodeState, object: Record<string, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue): Map<Value, Value> {
+function continueAsMap(state: DecodeState, object: Record<string, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue, writeCanonical: WriteValue): Map<Value, Value> {
   if (index > 1) checkDuplicates(state, Object.keys(object).length, index, headerOffset);
-  return readIntoMap(state, new Map<Value, Value>(Object.entries(object)), index, entryCount, headerOffset, readValue);
+  return readIntoMap(state, new Map<Value, Value>(Object.entries(object)), index, entryCount, headerOffset, readValue, writeCanonical);
 }
 
 /** state.position is immediately after the map's initial byte. Text keys build
  * a plain object; Map is used in 'map' mode, or in 'auto' mode from the first
  * non-text key. The object loop stays in this function: one call deeper, it
- * was not reliably inlined and small-object decoding became bimodal. */
-export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue): Value {
+ * was not reliably inlined and small-object decoding became bimodal.
+ * writeCanonical is the deterministic writer, for comparing object keys. */
+export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue, writeCanonical: WriteValue): Value {
   const bytes = state.bytes;
   const headerOffset = state.position - 1;
   const indefinite = additionalInfo === Info.Indefinite;
@@ -301,7 +340,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
     enterContainer(state, 2 * entryCount, headerOffset);
   }
   if (state.mapMode === 'map') {
-    const map = readIntoMap(state, new Map(), 0, entryCount, headerOffset, readValue);
+    const map = readIntoMap(state, new Map(), 0, entryCount, headerOffset, readValue, writeCanonical);
     leaveContainer(state);
     return map;
   }
@@ -318,7 +357,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
     } else if (state.mapMode === 'object') {
       return fail('unsupported-type', state.position, 'Map keys must be text strings (decode with maps: "auto" or "map")');
     } else {
-      const map = continueAsMap(state, object, index, entryCount, headerOffset, readValue);
+      const map = continueAsMap(state, object, index, entryCount, headerOffset, readValue, writeCanonical);
       leaveContainer(state);
       return map;
     }

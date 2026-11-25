@@ -13,7 +13,7 @@ It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple val
 
 - **Fast without tricks.** It is the fastest standard CBOR library measured, in pure JavaScript, with no native addon and no generated code. It runs unchanged where those aren't allowed: browsers with a strict CSP, web workers and edge runtimes. The same suite passes on Node, Deno, Bun, workerd, Chromium, Firefox and WebKit.
 - **Built for messages you have to trust.**
-  - **Hostile input:** limits are checked before anything is allocated, and every failure is a typed `CborError` with a byte offset, never a stack overflow or an out-of-bounds read. Invalid UTF-8 and duplicate map keys are rejected by default. For `Map` keys, only equal primitives are detected: see [decode options](#decode-options-and-limits).
+  - **Hostile input:** limits are checked before anything is allocated, and every failure is a typed `CborError` with a byte offset, never a stack overflow or an out-of-bounds read. Invalid UTF-8 and duplicate map keys are rejected by default, including byte-string, array and other container keys, which are compared as CBOR values.
   - **Signed data:** deterministic encoding, plus re-encoding signed data byte for byte.
   - **Published vectors:** COSE, CWT, WebAuthn and mdoc messages are checked against them.
 - **Small enough to read.** About 2,200 lines of code, organised as one job per file, with a [guided tour](https://davidgtonge.github.io/pure-cbor/) that follows a value through every step.
@@ -294,7 +294,7 @@ Notes:
   - Encoding takes own enumerable string keys in `Object.keys` order, with the preferred header. Properties set to `undefined` are omitted, as in JSON. Symbol keys are ignored. `Set`, class instances and boxed primitives are rejected rather than silently flattened.
   - A `__proto__` key decodes as an own data property: no prototype pollution, no renaming.
 - **Maps.** In the default `'auto'` mode, a map whose keys are all text decodes as a plain object, so a `Map` with only string keys comes back as an object. Use `maps: 'map'` to always get `Map`. Byte-string and other object keys are distinct by identity in a JS `Map`.
-- **Duplicate keys** are rejected by default (`duplicateKeys: 'last-wins'` to keep the last). For `Map`, only equal primitive keys can be detected.
+- **Duplicate keys** are rejected by default (`duplicateKeys: 'last-wins'` to keep the last). `Map` keys that are byte strings, arrays, maps or tags are compared as CBOR values, so equal ones are duplicates however they are encoded; with `'last-wins'` they stay separate entries, since a `Map` tells them apart.
 - **Indefinite-length items** (`5f`, `7f`, `9f`, `bf` … `ff`) are accepted on decode, including in streams. pure-cbor always encodes definite lengths. Text chunks must each be valid UTF-8 (RFC 8949 §3.2.3).
 
 ### Encode options

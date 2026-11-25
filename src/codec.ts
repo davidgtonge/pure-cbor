@@ -14,7 +14,7 @@ import * as Arena from './arena.js';
 import { fail } from './error.js';
 import { createState, enterContainer, leaveContainer } from './state.js';
 import type { DecodeState } from './state.js';
-import { createWriter, DEFAULT_PROFILE, ensure } from './writer.js';
+import { createWriter, DEFAULT_PROFILE, ensure, profileOf } from './writer.js';
 import type { EncodeProfile, Writer, WriteValue } from './writer.js';
 import { NOT_SCALAR, writeScalar } from './scalar.js';
 import type { Value, DecodeOptions, Decoded, TypedArray } from './types.js';
@@ -158,6 +158,10 @@ export function writerFor(profile: EncodeProfile): WriteValue {
   return writer;
 }
 
+/** The deterministic writer, which decoding uses to compare Map keys that
+ * are objects: equal CBOR values have equal deterministic encodings. */
+const writeCanonical: WriteValue = (writer, value, depth) => writerFor(profileOf({ deterministic: true }))(writer, value, depth);
+
 /** Append one item into caller memory. A capacity error never partially
  * writes: scalars check their own size, everything else is measured first. */
 export function writeBytes(bytes: Uint8Array, offset: number, value: Value, profile: EncodeProfile = DEFAULT_PROFILE): number {
@@ -254,7 +258,7 @@ export function readValue(state: DecodeState): Value {
       return ArrayCodec.read(state, additionalInfo, readValue);
     case Major.Map:
       state.position = position;
-      return MapCodec.read(state, additionalInfo, readValue);
+      return MapCodec.read(state, additionalInfo, readValue, writeCanonical);
     default: // Major.Tag, the only major type left
       state.position = position;
       return readTag(state, additionalInfo);
@@ -308,7 +312,7 @@ function readItem(buffer: Binary, offset: number, options: DecodeOptions | undef
     default: { // arrays, maps and tags
       const state = createState(bytes, offset, options);
       value = majorType === Major.Array ? ArrayCodec.read(state, additionalInfo, readValue)
-        : majorType === Major.Map ? MapCodec.read(state, additionalInfo, readValue)
+        : majorType === Major.Map ? MapCodec.read(state, additionalInfo, readValue, writeCanonical)
         : readTag(state, additionalInfo);
       end = state.position;
     }

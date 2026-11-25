@@ -284,6 +284,9 @@ testCase('malformed input fails with the documented error codes', () => {
     check(!result.ok && result.error.code === code, `tryDecode ${wire.slice(0, 20)}`);
   }
   checkSame(decode(fromHex('a2616101616102'), { duplicateKeys: 'last-wins' }), { a: 2 }, 'last-wins');
+  for (const wire of ['a2410101410102', 'a24101015801010 2'.replace(/ /g, ''), 'a2810101810102']) {
+    checkThrowsCode(() => decode(fromHex(wire)), 'duplicate-key', `equal object keys ${wire}`);
+  }
   checkThrowsCode(() => decode(fromHex('83010203'), { maxArrayLength: 2 }), 'array-limit', 'maxArrayLength');
   const cyclic = [];
   cyclic.push(cyclic);

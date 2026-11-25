@@ -108,6 +108,32 @@ test("maps: any keys; 'auto', 'object' and 'map' modes; duplicates", () => {
   assert.throws(() => decode(hex('a3616101016161 01 02'.replaceAll(' ', ''))), error('duplicate-key'));
   assert.throws(() => decode(hex('a2010101 02'.replaceAll(' ', ''))), error('duplicate-key'));
   assert.deepEqual(decode(hex('a2010101 02'.replaceAll(' ', '')), { duplicateKeys: 'last-wins' }), new Map([[1, 2]]));
+  // Object keys (byte strings, arrays, maps, tags) are compared as CBOR values,
+  // so equal ones are duplicates however they are encoded.
+  for (const wire of [
+    'a2 4101 01 4101 02',             // h'01' twice
+    'a2 4101 01 580101 02',           // h'01', then h'01' with a non-preferred length
+    'a2 4101 01 5f4101ff 02',         // h'01', then h'01' in chunks
+    'a2 8101 01 8101 02',             // [1] twice
+    'a2 a10102 01 a10102 02',         // {1: 2} twice
+    'a2 c74101 01 c74101 02',         // 7(h'01') twice
+    'a3 6161 01 4101 02 4101 03',     // 'auto' switching to Map first
+  ]) {
+    for (const maps of ['auto', 'map']) assert.throws(() => decode(hex(wire.replaceAll(' ', '')), { maps }), error('duplicate-key'), wire);
+  }
+  assert.equal(decode(hex('a2 4101 01 4102 02'.replaceAll(' ', ''))).size, 2, 'distinct byte strings');
+  assert.equal(decode(hex('a2 8101 01 81 4101 02'.replaceAll(' ', ''))).size, 2, '[1] and [h01] differ');
+  assert.equal(decode(hex('a2 4101 01 4101 02'.replaceAll(' ', '')), { duplicateKeys: 'last-wins' }).size, 2, 'last-wins does not merge object keys');
+  // Large maps sort instead of comparing pairwise, so the check stays fast.
+  const manyKeys = new Map(Array.from({ length: 20000 }, (_, index) => [Uint8Array.of(index >> 8, index & 255, 7), index]));
+  const started = performance.now();
+  assert.equal(decode(encode(manyKeys)).size, 20000);
+  assert.ok(performance.now() - started < 1000, 'not quadratic');
+  manyKeys.set(Uint8Array.of(0, 5, 7), 'again');
+  assert.throws(() => decode(encode(manyKeys)), error('duplicate-key'));
+  const manyArrays = new Map(Array.from({ length: 40 }, (_, index) => [[index, 'k'], index]));
+  manyArrays.set([39, 'k'], 'again');
+  assert.throws(() => decode(encode(manyArrays)), error('duplicate-key'));
   // __proto__ stays an ordinary key in Map mode too.
   assert.deepEqual(decode(encode({ ['__proto__']: 1 }), { maps: 'map' }), new Map([['__proto__', 1]]));
   assert.equal(encodedSize(keys), encode(keys).length);
@@ -226,7 +252,8 @@ test('random trees with every value kind round trip in all encode modes', () => 
     switch (int(4)) {
       case 0: return Array.from({ length: int(5) }, () => tree(depth + 1));
       case 1: return Object.fromEntries(Array.from({ length: int(5) }, () => ['p' + int(50), tree(depth + 1)]).filter(([, v]) => v !== undefined));
-      case 2: return new Map(Array.from({ length: int(4) }, () => [int(2) ? int(100) : bytesOf(int(9)), tree(depth + 1)]));
+      // Byte-string keys get the entry index as a second byte: equal ones would be duplicate keys.
+      case 2: return new Map(Array.from({ length: int(4) }, (_, index) => [int(2) ? int(100) : bytesOf(int(9), index), tree(depth + 1)]));
       default: return tagged(1000 + int(50), tree(depth + 1));
     }
   };
