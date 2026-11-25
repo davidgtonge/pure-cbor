@@ -9,6 +9,46 @@ It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple val
 
 **[Read the guided tour of the code →](https://davidgtonge.github.io/pure-cbor/)** Its principles, and how a value flows through encode and decode, with diagrams and excerpts from the source.
 
+## Why pure-cbor
+
+- **Fast without tricks.** It is the fastest standard CBOR library measured, in pure JavaScript, with no native addon and no generated code. It runs unchanged where those aren't allowed: browsers with a strict CSP, web workers and edge runtimes. The same suite passes on Node, Deno, Bun, workerd, Chromium, Firefox and WebKit.
+- **Built for messages you have to trust.**
+  - **Hostile input:** limits are checked before anything is allocated, and every failure is a typed `CborError` with a byte offset, never a stack overflow or an out-of-bounds read. Invalid UTF-8 and duplicate map keys are rejected by default. For `Map` keys, only equal primitives are detected: see [decode options](#decode-options-and-limits).
+  - **Signed data:** deterministic encoding, plus re-encoding signed data byte for byte.
+  - **Published vectors:** COSE, CWT, WebAuthn and mdoc messages are checked against them.
+- **Small enough to read.** About 2,200 lines of code, organised as one job per file, with a [guided tour](https://davidgtonge.github.io/pure-cbor/) that follows a value through every step.
+- **Nothing else to trust.**
+  - No runtime dependencies, not even optional ones.
+  - Releases are built in GitHub Actions and published with npm provenance.
+  - CI actions are pinned to commit SHAs.
+
+### Compared with other CBOR libraries
+
+| Library | Version | Runtime dependencies | Lines of code | Minified + gzip |
+|---|---|---|---:|---:|
+| **pure-cbor** | 1.0.1 | none | 2,191 | 11.4 KB |
+| cbor-x | 1.6.9 | optional `cbor-extract`, a native addon: 4 packages including a prebuilt binary | 2,973 | 15.0 KB |
+| cborg | 7.0.0 | none | 1,876 | 8.9 KB |
+| cbor2 | 2.4.2 | 1 (`@cto.af/wtf8`) | 3,073 | 15.4 KB |
+| cbor (node-cbor) | 10.0.12 | 1 (`nofilter`), plus Node's `stream` and `Buffer` | 2,941 | 13.0 KB |
+| @levischuck/tiny-cbor | 0.3.6 | none | 438 | 2.1 KB |
+| cbor-js | 0.1.0 | none | 378 | 2.1 KB |
+
+**How this was measured:**
+
+- Each library's whole public API (`export * from '…'`) was bundled with esbuild 0.25 as ESM, including its JavaScript dependencies. Node's built-in modules and cbor-x's native addon were left out.
+- "Lines of code" counts the non-blank, non-comment lines of the unminified bundle. Bundling reformats every library the same way, so the counts are comparable.
+- For pure-cbor, the bundle count matches its own TypeScript source: 2,190 lines of code, or 2,844 with comments.
+- Measured in November 2026.
+
+**When another library fits better:**
+
+- **Smallest bundle:** cborg is 15–20% smaller. On the public corpus it is 1.4–21× slower, partly because by default it does extra work: it sorts map keys and writes the smallest float. See [BENCHMARK.md](BENCHMARK.md).
+- **Smaller still:** tiny-cbor and cbor-js are a fifth of the size, and do less.
+  - tiny-cbor throws on bigints beyond 64 bits, `Date`s, typed arrays, half-precision floats and indefinite lengths.
+  - cbor-js turns bigints, `Date`s and `Map`s into `{}` and drops tags.
+- **Both ends under your control:** cbor-x's records mode decodes repeated object shapes about 2.6× faster, using a non-standard wire format and `new Function`.
+
 ## Install
 
 ```sh
