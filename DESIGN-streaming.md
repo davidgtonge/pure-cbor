@@ -1,4 +1,4 @@
-# Design proposal: streaming (cbor-fp 0.4)
+# Design proposal: streaming (pure-cbor 0.4)
 
 Status: **implemented in 0.4.0** with the recommended defaults: optimistic in-chunk decoding with a resumable scanner, `maxItemBytes` 16 MiB, `chunkBytes: 0`, no `maxDelayMs`, and the proposed names. Results are in BENCHMARK.md ("Streaming").
 
@@ -24,9 +24,9 @@ The original proposal follows unchanged.
 
 Non-goals for 0.4: indefinite-length items (still unsupported), streaming the elements of one huge top-level array (see §9), cbor-x-style records, tags.
 
-## 2. Why this fits cbor-fp especially well
+## 2. Why this fits pure-cbor especially well
 
-Stream chunks are **fresh buffers**, and fresh input is where cbor-fp is far ahead: 10–14× faster than cbor-x and cborg on small values, because it never builds a DataView over a fresh small buffer (BENCHMARK.md, "Decode (fresh input)"). A streaming decoder that keeps that property should beat cbor-x's `DecoderStream` comfortably on small-message streams.
+Stream chunks are **fresh buffers**, and fresh input is where pure-cbor is far ahead: 10–14× faster than cbor-x and cborg on small values, because it never builds a DataView over a fresh small buffer (BENCHMARK.md, "Decode (fresh input)"). A streaming decoder that keeps that property should beat cbor-x's `DecoderStream` comfortably on small-message streams.
 
 ## 3. Layers
 

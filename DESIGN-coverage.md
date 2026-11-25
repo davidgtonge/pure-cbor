@@ -1,10 +1,10 @@
-# Design record: full CBOR data model (cbor-fp 0.5)
+# Design record: full CBOR data model (pure-cbor 0.5)
 
 Status: **implemented in 0.5.0**. This records the decisions and what measurement changed along the way.
 
 ## Scope
 
-Before 0.5, cbor-fp covered the JSON-like core plus typed arrays. 0.5 adds:
+Before 0.5, pure-cbor covered the JSON-like core plus typed arrays. 0.5 adds:
 
 1. **Tags:**
    - `Tagged` pass-through for any tag;

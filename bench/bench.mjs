@@ -66,7 +66,7 @@ function supports(library, values) {
 
 for (const [name, values] of cases) {
   if (filter && !filter.test(name)) continue;
-  for (const value of values) deepStrictEqual(decode(encode(value)), value, `${name}: cbor-fp round trip`);
+  for (const value of values) deepStrictEqual(decode(encode(value)), value, `${name}: pure-cbor round trip`);
   const mask = values.length - 1;
   const largest = Math.max(...values.map(value => maxEncodedSize(value)));
   const batch = largest > 65536 ? 8 : largest > 1024 ? 128 : 512;

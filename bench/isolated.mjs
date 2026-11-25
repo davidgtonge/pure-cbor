@@ -1,5 +1,5 @@
 // Runs every bench.mjs workload in its own Node process and prints markdown
-// tables comparing cbor-fp with every installed library (see libraries.mjs).
+// tables comparing pure-cbor with every installed library (see libraries.mjs).
 // Workloads sharing one process skew each other's V8 type feedback, which
 // made earlier cross-workload comparisons unreliable.
 import { execFileSync } from 'node:child_process';
@@ -30,11 +30,11 @@ const cborLibraries = libraries.filter(library => library.format === 'CBOR').map
 
 console.log(`Node ${process.version}, ${process.platform}/${process.arch}. Each workload in its own process; median of ${process.env.BENCH_ROUNDS || 3} rounds.`);
 console.log(`Libraries: ${libraries.map(library => `${library.name} (${library.format})`).join(', ')}. "–" means the library cannot round-trip that workload exactly.`);
-console.log('Ratios are the fastest other library\'s time divided by cbor-fp\'s: above 1 means cbor-fp is faster.');
+console.log('Ratios are the fastest other library\'s time divided by pure-cbor\'s: above 1 means pure-cbor is faster.');
 for (const [title, suffix] of operations) {
   console.log(`\n### ${title}\n`);
   const names = libraries.map(library => library.name);
-  console.log(`| Workload | cbor-fp | ${names.join(' | ')} | vs best CBOR | vs best overall |`);
+  console.log(`| Workload | pure-cbor | ${names.join(' | ')} | vs best CBOR | vs best overall |`);
   console.log(`| --- | ---: |${' ---: |'.repeat(names.length + 2)}`);
   for (const [workload, methods] of results) {
     const ours = methods[suffix];

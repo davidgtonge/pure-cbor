@@ -1,6 +1,6 @@
 // Comparison libraries for bench.mjs, each behind the same small adapter:
 //   encode(value) -> an independently owned encoding (pooled outputs are copied,
-//                    as cbor-fp's encode() is owned);
+//                    as pure-cbor's encode() is owned);
 //   decode(input) -> the decoded value, from that library's own encoding;
 //   fresh(input)  -> a fresh copy of the input, for "just received" decoding;
 //   prepare(value)  -> the library's native form of a workload (untimed);

@@ -1,10 +1,32 @@
 {
-  "name": "cbor-fp",
-  "version": "0.6.0",
-  "private": true,
-  "description": "A small, functional, performance-oriented TypeScript CBOR subset",
+  "name": "pure-cbor",
+  "version": "1.0.0",
+  "description": "Fast, functional CBOR for JavaScript and TypeScript: the full RFC 8949 data model, streaming, COSE-ready, zero dependencies",
+  "author": "Dave Tonge",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidgtonge/pure-cbor.git"
+  },
+  "homepage": "https://github.com/davidgtonge/pure-cbor#readme",
+  "bugs": "https://github.com/davidgtonge/pure-cbor/issues",
+  "keywords": [
+    "cbor",
+    "rfc8949",
+    "rfc8742",
+    "rfc8746",
+    "cose",
+    "webauthn",
+    "cwt",
+    "mdoc",
+    "serialization",
+    "binary",
+    "streaming",
+    "typescript"
+  ],
   "type": "module",
   "sideEffects": false,
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -14,7 +36,9 @@
   "files": [
     "dist",
     "src",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "lint": "tsc -p tsconfig.json --noEmit",
@@ -25,12 +49,13 @@
     "bench:isolated": "npm run build && node bench/isolated.mjs",
     "bench:stream": "npm run build && node bench/stream.mjs",
     "bench:json": "npm run build && node bench/json.mjs",
-    "bench:cose": "npm run build && node bench/cose.mjs"
+    "bench:cose": "npm run build && node bench/cose.mjs",
+    "prepublishOnly": "npm run lint && npm test"
   },
   "devDependencies": {
     "typescript": "^5.8.3"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

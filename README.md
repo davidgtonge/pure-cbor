@@ -1,52 +1,22 @@
-# cbor-fp 0.6.0
+# pure-cbor
 
-A small, functional, performance-oriented TypeScript implementation of a deliberately limited CBOR subset. No runtime dependencies, Node APIs, generated code (CSP-safe), encoder/decoder classes or mutable global operation state. Standard CBOR only, no private wire format.
+CBOR for JavaScript and TypeScript, with two promises:
 
-New in 0.6.0:
+1. **Clean, functional code.** Pure functions over explicit state, in the spirit of OCaml: no classes (apart from the error type), no state kept between calls apart from a documented cache of decoded map keys, immutable tagged variants, and one named set of wire constants. About 2,800 lines of strict TypeScript, with no runtime dependencies, no Node APIs and no generated code (CSP-safe).
+2. **The fastest standard CBOR library for JavaScript.** Pure JS, no native addon. On public benchmark data it decodes 1.16–1.71× faster than cbor-x, the next fastest of the six other CBOR libraries measured, and encodes level with it to 1.50× faster (cbor-x also measured as pure JS, without its optional native addon). Small messages decoded from a fresh buffer are 5–12× faster. It isn't ahead everywhere: some small mixed arrays and objects are level, and on COSE and WebAuthn messages it matches cbor-x only with `binaryOwnership: 'borrow'`, since cbor-x returns views into the input by default while pure-cbor copies. Details in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
 
-- Cheaper default byte-string copies. Byte strings over 64 bytes from one decode are copied into a single per-decode arena instead of one allocation each: about 2× faster on COSE and WebAuthn messages, which are mostly keys, signatures and certificates. Results are still independent of the input; byte strings from one decode may now share a backing buffer. `binaryOwnership: 'copy-separate'` restores one exact buffer per byte string.
-- Faster encoding of `Map` (inline paths for integer and short text keys, byte strings and scalars) and of byte strings everywhere: COSE_Key encoding is 17% faster and `Sig_structure` 32% faster.
+It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple values, typed arrays), deterministic encoding, CBOR sequences over Web Streams, and COSE, CWT, WebAuthn and mdoc messages, checked against their published test vectors. Standard CBOR only: no private wire format.
 
-New in 0.5.0:
-
-- The whole CBOR data model: tags (`Tagged`, with dates, bignums and custom decoders), `undefined` and all simple values, `BigInt`, `Date`, `Map` with any keys, and indefinite-length items on decode. Every example in RFC 8949 Appendix A decodes.
-- Opt-in `floats: 'shortest'` (RFC 8949 §4.1 preferred floats) and `deterministic: true` (core deterministic encoding, §4.2.1). On public data, deterministic output matches cborg's canonical encoding byte for byte.
-- Behaviour changes:
-  - 64-bit integers beyond 2^53 decode as `BigInt` instead of erroring.
-  - Maps with non-text keys decode as `Map` (`maps: 'object'` restores the error).
-  - Unknown tags decode as `Tagged` instead of erroring.
-  - `undefined` and holes in arrays encode as `f7`.
-
-New in 0.4.0:
-
-- Streaming: CBOR sequences (RFC 8742) over Web Streams and async iterators, plus an environment-free incremental core. See [Streaming](#streaming).
-
-New in 0.3.0:
-
-- Plain objects as CBOR maps, and arbitrary nesting of arrays and objects.
-- `false`, `true` and `null`.
-- Every safe integer encodes as a CBOR integer (previously above 2^32 it was a float).
-- Limits for hostile input: depth, map size, and a total allocation budget.
-- Faster small values throughout. Measured per process against cbor-x and cborg, including on public data other libraries benchmark with, in [BENCHMARK.md](BENCHMARK.md).
-
-Breaking changes from 0.2.0:
-
-- `Binary` no longer has a `view` (DataView) field.
-- Integers from 2^32 to 2^53 − 1 now go on the wire as integers instead of floats.
-- `maxEncodedSize`/`encodedSize`/`encode` now accept and size nested values and objects.
-
-## Start
+## Install
 
 ```sh
-npm install
-npm test
-npm run bench
+npm install pure-cbor
 ```
 
-The package ships compiled ESM and declarations in `dist/`. Import `./dist/index.js` locally, or `cbor-fp` when installed as a package.
+Plain ESM with TypeScript declarations, needing only ES2023 and `TextEncoder`/`TextDecoder`. Tested on Node 22, 24 and 26 and on Deno; it should also run in Bun, browsers and workers, but those aren't tested yet.
 
 ```ts
-import { encode, decode } from './dist/index.js';
+import { encode, decode } from 'pure-cbor';
 
 const bytes = encode({ id: 7, name: 'Ada', tags: ['x', 'y'], active: true, manager: null });
 console.log(decode(bytes)); // { id: 7, name: 'Ada', tags: ['x', 'y'], active: true, manager: null }
@@ -56,8 +26,8 @@ console.log(decode(encode(new Float64Array([1.25, -0, Math.PI])))); // Float64Ar
 ## Functional core
 
 ```ts
-import { binary, read, readWhole, write, maxEncodedSize } from './dist/index.js';
-import type { Value } from './dist/index.js';
+import { binary, read, readWhole, write, maxEncodedSize } from 'pure-cbor';
+import type { Value } from 'pure-cbor';
 
 const values: Value[] = [42, 'hello', { list: [1, 'x'] }, new Float32Array([1, 2, 3])];
 const capacity = values.reduce((total, value) => total + maxEncodedSize(value), 0);
@@ -104,7 +74,7 @@ Exactly sized, with no shared backing buffer. The bytes can be retained or trans
 ### 2. Caller-owned buffer
 
 ```ts
-import { binary, write, encodeInto } from './dist/index.js';
+import { binary, write, encodeInto } from 'pure-cbor';
 const destination = new Uint8Array(1024);
 const prepared = binary(destination);
 let offset = write(prepared, 0, 42);
@@ -117,7 +87,7 @@ The fastest interface for scalars when you manage memory yourself. A capacity er
 ### 3. Slab-backed encoder (opt-in)
 
 ```ts
-import { createSlabEncoder, decode } from './dist/index.js';
+import { createSlabEncoder, decode } from 'pure-cbor';
 const pooled = createSlabEncoder({ slabSize: 64 * 1024, maxPooledValueSize: 16 * 1024 });
 const first = pooled(42);
 const second = pooled({ list: [1, 'hello'] });
@@ -139,7 +109,7 @@ console.log(decode(first)); // 42, even after later calls
 A CBOR sequence (RFC 8742, media type `application/cbor-seq`) is complete CBOR items written back to back. These functions read and write sequences over Web Streams, which are built into browsers, Node ≥ 18, Deno, Bun and workerd, and over any async iterable of bytes, including Node streams.
 
 ```ts
-import { decodeStream, decodeSequence, encodeSequence, encodeStream } from './dist/index.js';
+import { decodeStream, decodeSequence, encodeSequence, encodeStream } from 'pure-cbor';
 
 // Decode a response body item by item.
 for await (const value of decodeSequence(response.body!)) handle(value);
@@ -162,7 +132,7 @@ source.pipeThrough(encodeStream()).pipeTo(destination);
 Without streams, for example with WebSocket messages, Node `'data'` events or tests, use the incremental core directly:
 
 ```ts
-import { createSequenceDecoder, createSequenceEncoder } from './dist/index.js';
+import { createSequenceDecoder, createSequenceEncoder } from 'pure-cbor';
 
 const decoder = createSequenceDecoder();
 socket.onmessage = event => decoder.push(new Uint8Array(event.data), handle);
@@ -204,7 +174,7 @@ encoder.flush(send);
 These formats are tested against their own specifications' examples (see [test/vectors](test/vectors/README.md)): every COSE working-group example, the RFC 8392 CWTs, all WebAuthn Level 3 attestations, and the ISO 18013-5 mobile driving licence flow.
 
 ```ts
-import { binary, decode, encode, read, isTagged, tagged } from './dist/index.js';
+import { binary, decode, encode, read, isTagged, tagged } from 'pure-cbor';
 
 // COSE_Sign1: rebuild the exact bytes the signature covers.
 const message = decode(bytes, { binaryOwnership: 'borrow' });   // views: much faster for byte-heavy messages
@@ -282,7 +252,7 @@ Notes:
   - A `__proto__` key decodes as an own data property: no prototype pollution, no renaming.
 - **Maps.** In the default `'auto'` mode, a map whose keys are all text decodes as a plain object, so a `Map` with only string keys comes back as an object. Use `maps: 'map'` to always get `Map`. Byte-string and other object keys are distinct by identity in a JS `Map`.
 - **Duplicate keys** are rejected by default (`duplicateKeys: 'last-wins'` to keep the last). For `Map`, only equal primitive keys can be detected.
-- **Indefinite-length items** (`5f`, `7f`, `9f`, `bf` … `ff`) are accepted on decode, including in streams. cbor-fp always encodes definite lengths. Text chunks must each be valid UTF-8 (RFC 8949 §3.2.3).
+- **Indefinite-length items** (`5f`, `7f`, `9f`, `bf` … `ff`) are accepted on decode, including in streams. pure-cbor always encodes definite lengths. Text chunks must each be valid UTF-8 (RFC 8949 §3.2.3).
 
 ### Encode options
 
@@ -391,4 +361,4 @@ npm test
 npm run bench:isolated
 ```
 
-The benchmark includes a public corpus in [bench/corpus](bench/corpus/README.md): cbor-x's own benchmark document, @msgpack/msgpack's sample data, and seeded Bluesky-style records and float meshes shaped like cborg's and rust_serialization_benchmark's workloads. `BENCH_MS`, `BENCH_ROUNDS` and `BENCH_FILTER` control timing and workload selection. Compare workloads with `bench:isolated`: workloads sharing a process skew each other's V8 type feedback by up to 2×. The harness disables cbor-x's native string extraction, so it compares pure JS with pure JS. Tested on Node 22 only; browser and workerd performance remain unverified.
+The benchmark includes a public corpus in [bench/corpus](bench/corpus/README.md): cbor-x's own benchmark document, @msgpack/msgpack's sample data, and seeded Bluesky-style records and float meshes shaped like cborg's and rust_serialization_benchmark's workloads. `BENCH_MS`, `BENCH_ROUNDS` and `BENCH_FILTER` control timing and workload selection. Compare workloads with `bench:isolated`: workloads sharing a process skew each other's V8 type feedback by up to 2×. The harness disables cbor-x's native string extraction, so it compares pure JS with pure JS. Benchmarked on Node 22 only; browser and workerd performance remain unverified.

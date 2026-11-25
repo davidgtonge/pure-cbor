@@ -1,4 +1,4 @@
-// Streaming benchmark: CBOR sequences through cbor-fp's incremental decoder,
+// Streaming benchmark: CBOR sequences through pure-cbor's incremental decoder,
 // its Web Streams adapters, and cbor-x's Node-stream DecoderStream/EncoderStream.
 // Every variant runs in its own process. Each run slices fresh chunk buffers
 // (as a network stream delivers them) inside the timed region, for every variant.
@@ -58,8 +58,8 @@ async function variants() {
     : async () => { for (const item of rowItems) decode(item.slice()); return rowItems.length; };
   const list = {};
   for (const [name, bytes, size, expected] of decodeCases) {
-    list[`${name} | cbor-fp decode() per item (no streaming)`] = perItem(expected);
-    list[`${name} | cbor-fp sequence decoder`] = async () => {
+    list[`${name} | pure-cbor decode() per item (no streaming)`] = perItem(expected);
+    list[`${name} | pure-cbor sequence decoder`] = async () => {
       const decoder = createSequenceDecoder();
       let count = 0;
       const onValue = () => { count++; };
@@ -67,17 +67,17 @@ async function variants() {
       decoder.end();
       return count;
     };
-    list[`${name} | cbor-fp decodeStream (Web Streams)`] = async () => {
+    list[`${name} | pure-cbor decodeStream (Web Streams)`] = async () => {
       let count = 0;
       for await (const _ of fromChunks(freshChunks(bytes, size)).pipeThrough(decodeStream())) count++;
       return count;
     };
-    list[`${name} | cbor-fp decodeStream (Web Streams), batch`] = async () => {
+    list[`${name} | pure-cbor decodeStream (Web Streams), batch`] = async () => {
       let count = 0;
       for await (const batch of fromChunks(freshChunks(bytes, size)).pipeThrough(decodeStream({ batch: true }))) count += batch.length;
       return count;
     };
-    list[`${name} | cbor-fp decodeSequence (async iterator)`] = async () => {
+    list[`${name} | pure-cbor decodeSequence (async iterator)`] = async () => {
       let count = 0;
       for await (const _ of decodeSequence(freshChunks(bytes, size))) count++;
       return count;
@@ -96,14 +96,14 @@ async function variants() {
   const rowBatches = [];
   for (let index = 0; index < rows.length; index += 1000) rowBatches.push(rows.slice(index, index + 1000));
   for (const chunkBytes of [0, 16384]) {
-    list[`encode 100k rows | cbor-fp encodeStream (Web Streams), batches of 1000, chunkBytes ${chunkBytes}`] = async () => {
+    list[`encode 100k rows | pure-cbor encodeStream (Web Streams), batches of 1000, chunkBytes ${chunkBytes}`] = async () => {
       let bytes = 0;
       for await (const chunk of pullFrom(rowBatches).pipeThrough(encodeStream({ batch: true, chunkBytes }))) bytes += chunk.length;
       return bytes === rowBytes.length ? ROW_COUNT : -1;
     };
   }
   for (const chunkBytes of [0, 16384]) {
-    list[`encode 100k rows | cbor-fp sequence encoder, chunkBytes ${chunkBytes}`] = async () => {
+    list[`encode 100k rows | pure-cbor sequence encoder, chunkBytes ${chunkBytes}`] = async () => {
       const encoder = createSequenceEncoder({ chunkBytes });
       let bytes = 0;
       const onChunk = chunk => { bytes += chunk.length; };
@@ -111,7 +111,7 @@ async function variants() {
       encoder.flush(onChunk);
       return bytes === rowBytes.length ? ROW_COUNT : -1;
     };
-    list[`encode 100k rows | cbor-fp encodeStream (Web Streams), chunkBytes ${chunkBytes}`] = async () => {
+    list[`encode 100k rows | pure-cbor encodeStream (Web Streams), chunkBytes ${chunkBytes}`] = async () => {
       let bytes = 0;
       const source = pullFrom(rows);
       for await (const chunk of source.pipeThrough(encodeStream({ chunkBytes }))) bytes += chunk.length;

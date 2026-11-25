@@ -1,4 +1,4 @@
-# Design proposal: objects and nesting (cbor-fp 0.3)
+# Design proposal: objects and nesting (pure-cbor 0.3)
 
 Status: **implemented in 0.3.0** with the recommended defaults: plain objects only, `undefined` properties omitted, duplicates rejected, `maxDepth` 128, a module-level key cache. Measured results are in BENCHMARK.md.
 

@@ -52,14 +52,14 @@ async function loadLibraries() {
   // what cbor-x does by default (and is safe while the input is kept).
   const borrow = { binaryOwnership: 'borrow' };
   const libraries = [{
-    name: 'cbor-fp',
+    name: 'pure-cbor',
     decode: bytes => cborFp.decode(bytes),
     decodeFirst: bytes => cborFp.read(cborFp.binary(bytes), 0)[0],
     encode: value => cborFp.encode(value),
     contentOf,
     bytes: plainBytes,
   }, {
-    name: 'cbor-fp (borrow)',
+    name: 'pure-cbor (borrow)',
     decode: bytes => cborFp.decode(bytes, borrow),
     decodeFirst: bytes => cborFp.read(cborFp.binary(bytes), 0, borrow)[0],
     encode: value => cborFp.encode(value),
@@ -225,7 +225,7 @@ async function runFlow(flowName) {
   const reference = flow.run(libraries[0]);
   if (flowName === 'COSE_Key: encode' && reference !== toHex(cborFp.encode(coseKeyFor(libraries[0])))) throw new Error('COSE_Key reference');
   // Spec checks for the reference: algorithms, signed bytes, claims, items.
-  if (flowName.startsWith('COSE_Sign1')) reference.forEach(([, toBeSigned], index) => { if (toBeSigned !== sign1[index].toBeSigned) throw new Error('cbor-fp Sig_structure mismatch'); });
+  if (flowName.startsWith('COSE_Sign1')) reference.forEach(([, toBeSigned], index) => { if (toBeSigned !== sign1[index].toBeSigned) throw new Error('pure-cbor Sig_structure mismatch'); });
   const results = {};
   for (const library of libraries) {
     let output;
@@ -242,8 +242,8 @@ if (process.env.COSE_FLOW) {
   const self = fileURLToPath(import.meta.url);
   const names = (await loadLibraries()).map(library => library.name);
   console.log(`Node ${process.version}, ${process.platform}/${process.arch}. Each flow in its own process; median of ${rounds} rounds. Times are per flow (all its messages).`);
-  console.log('Every library is checked to produce the same result as cbor-fp (which is checked against the spec vectors) before it is timed.\n');
-  console.log(`| Flow | ${names.join(' | ')} | vs cbor-fp | vs cbor-fp (borrow) |`);
+  console.log('Every library is checked to produce the same result as pure-cbor (which is checked against the spec vectors) before it is timed.\n');
+  console.log(`| Flow | ${names.join(' | ')} | vs pure-cbor | vs pure-cbor (borrow) |`);
   console.log(`| --- |${' ---: |'.repeat(names.length + 2)}`);
   const format = ns => ns >= 10000 ? `${(ns / 1000).toFixed(1)} µs` : `${ns.toFixed(0)} ns`;
   for (const flowName of Object.keys(flows)) {
@@ -251,9 +251,9 @@ if (process.env.COSE_FLOW) {
     const output = execFileSync(process.execPath, [self], { env: { ...process.env, COSE_FLOW: flowName }, encoding: 'utf8' });
     const results = JSON.parse(output.trim().split('\n').at(-1));
     const cells = names.map(name => results[name]?.ns !== undefined ? format(results[name].ns) : `– (${results[name]?.error ?? 'n/a'})`);
-    // Fastest other library divided by each cbor-fp mode: above 1 means cbor-fp is faster.
-    const others = names.filter(name => !name.startsWith('cbor-fp')).map(name => results[name]?.ns).filter(ns => ns !== undefined);
+    // Fastest other library divided by each pure-cbor mode: above 1 means pure-cbor is faster.
+    const others = names.filter(name => !name.startsWith('pure-cbor')).map(name => results[name]?.ns).filter(ns => ns !== undefined);
     const ratio = ours => (others.length ? `${(Math.min(...others) / ours).toFixed(2)}×` : '–');
-    console.log(`| ${flowName} | ${cells.join(' | ')} | ${ratio(results['cbor-fp'].ns)} | ${ratio(results['cbor-fp (borrow)'].ns)} |`);
+    console.log(`| ${flowName} | ${cells.join(' | ')} | ${ratio(results['pure-cbor'].ns)} | ${ratio(results['pure-cbor (borrow)'].ns)} |`);
   }
 }

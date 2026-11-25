@@ -1,4 +1,4 @@
-// cbor-fp vs the engine's built-in JSON, on every workload JSON represents
+// pure-cbor vs the engine's built-in JSON, on every workload JSON represents
 // exactly. JSON is measured two ways:
 //   string: JSON.stringify / JSON.parse alone (data already a JS string)
 //   bytes:  stringify + TextEncoder / TextDecoder + parse, i.e. what crosses a
@@ -83,11 +83,11 @@ if (process.env.JSON_WORKLOAD) {
   const format = ns => ns === undefined ? '–' : ns >= 10000 ? `${(ns / 1000).toFixed(1)} µs` : `${ns.toFixed(0)} ns`;
   const ratio = (json, cbor) => json === undefined ? '–' : `${(json / cbor).toFixed(2)}×`;
   console.log(`Node ${process.version}, ${process.platform}/${process.arch}. Each workload in its own process; median of ${rounds} rounds.`);
-  console.log('Ratios are JSON time divided by cbor-fp time: above 1 means cbor-fp is faster.');
+  console.log('Ratios are JSON time divided by pure-cbor time: above 1 means pure-cbor is faster.');
   console.log(`Skipped (JSON cannot represent them exactly): ${skipped.join(', ')}.`);
   const table = (title, cborKey, stringKey, bytesKey) => {
     console.log(`\n### ${title}\n`);
-    console.log('| Workload | cbor-fp | JSON (string) | vs string | JSON (bytes) | vs bytes |');
+    console.log('| Workload | pure-cbor | JSON (string) | vs string | JSON (bytes) | vs bytes |');
     console.log('| --- | ---: | ---: | ---: | ---: | ---: |');
     for (const [name, r] of results) {
       if (r[cborKey] === undefined) continue;
@@ -97,7 +97,7 @@ if (process.env.JSON_WORKLOAD) {
   table('Encode', 'cbor encode', 'json stringify', 'json encode bytes');
   table('Decode (reused input)', 'cbor decode', 'json parse', 'json decode bytes');
   console.log('\n### Decode (fresh input bytes)\n');
-  console.log('| Workload | cbor-fp | JSON (bytes) | vs bytes |');
+  console.log('| Workload | pure-cbor | JSON (bytes) | vs bytes |');
   console.log('| --- | ---: | ---: | ---: |');
   for (const [name, r] of results) {
     if (r['cbor decode fresh'] === undefined) continue;
