@@ -3,6 +3,7 @@ import { argumentEnd, argumentSize, readArgumentValue, writeArgument, Info, Majo
 import * as NumberCodec from './number.js';
 import * as StringCodec from './string.js';
 import * as Simple from './simple.js';
+import * as Tag from './tag.js';
 import * as TypedArrayCodec from './typed-array.js';
 import * as KeyCache from './keys.js';
 import { fail } from './error.js';
@@ -279,26 +280,64 @@ function hasEqualBytes(arrays: readonly Uint8Array[]): boolean {
   return false;
 }
 
+/** A string that two keys share exactly when they are equal CBOR values:
+ * integers equal whether number or bigint, maps and objects equal whatever
+ * their entry order. Each part delimits itself, so the parts can't run into
+ * each other. Built from the decoded value, so decoding needs no encoder. */
+function keyFingerprint(value: Value): string {
+  switch (typeof value) {
+    case 'string': return 's' + JSON.stringify(value);
+    case 'bigint': return 'i' + value.toString();
+    case 'number':
+      return Number.isSafeInteger(value) && !Object.is(value, -0) ? 'i' + String(value) : 'f' + (Object.is(value, -0) ? '-0' : String(value));
+    case 'boolean': return value ? 'T' : 'F';
+    case 'undefined': return 'U';
+  }
+  if (value === null) return 'N';
+  if (value instanceof Uint8Array) return 'b' + bytesFingerprint(value);
+  if (ArrayBuffer.isView(value)) {
+    return 'y' + value.constructor.name + bytesFingerprint(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+  }
+  if (Array.isArray(value)) return '[' + value.map(keyFingerprint).join(',') + ']';
+  if (value instanceof Date) return 'd' + String(value.getTime());
+  if (value instanceof Map) return entriesFingerprint(Array.from(value));
+  if (Tag.isTagged(value)) return 't' + String(value.tag) + '(' + keyFingerprint(value.value) + ')';
+  if (Simple.isSimpleValue(value)) return 'x' + String(value.simple);
+  return entriesFingerprint(Object.entries(value));
+}
+
+function entriesFingerprint(entries: ReadonlyArray<readonly [Value, Value]>): string {
+  return '{' + entries.map(([key, item]) => keyFingerprint(key) + '=' + keyFingerprint(item)).toSorted().join(',') + '}';
+}
+
+function bytesFingerprint(bytes: Uint8Array): string {
+  let text = String(bytes.length) + ':';
+  for (const byte of bytes) text += (byte < 16 ? '0' : '') + byte.toString(16);
+  return text;
+}
+
 /** A Map tells primitive keys apart by value but object keys (byte strings,
  * arrays, maps, tags, dates) only by identity, so two equal byte strings are
  * two entries. This runs only for maps that have object keys. Byte strings,
  * the common case, are equal when their bytes are; the rest are compared by
- * their deterministic encodings, which equal CBOR values share. (Re-encoding
- * byte-string keys too made decoding such maps ~6x slower.) */
-function checkObjectKeys(state: DecodeState, objectKeys: readonly Value[], headerOffset: number, writeCanonical: WriteValue): void {
+ * fingerprint. */
+function checkObjectKeys(state: DecodeState, objectKeys: readonly Value[], headerOffset: number): void {
   if (!state.rejectDuplicateKeys || objectKeys.length < 2) return;
   const byteStrings: Uint8Array[] = [];
-  const otherKeys: Value[] = [];
+  const fingerprints = new Set<string>();
+  let otherKeys = 0;
   for (const key of objectKeys) {
-    if (key instanceof Uint8Array) byteStrings.push(key);
-    else otherKeys.push(key);
+    if (key instanceof Uint8Array) {
+      byteStrings.push(key);
+    } else {
+      fingerprints.add(keyFingerprint(key));
+      otherKeys++;
+    }
   }
-  const hasEqual = hasEqualBytes(byteStrings)
-    || (otherKeys.length > 1 && hasEqualBytes(otherKeys.map((key) => encodeKey(key, 0, writeCanonical))));
-  if (hasEqual) fail('duplicate-key', headerOffset, 'Duplicate map key');
+  if (hasEqualBytes(byteStrings) || fingerprints.size !== otherKeys) fail('duplicate-key', headerOffset, 'Duplicate map key');
 }
 
-function readIntoMap(state: DecodeState, map: Map<Value, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue, writeCanonical: WriteValue): Map<Value, Value> {
+function readIntoMap(state: DecodeState, map: Map<Value, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue): Map<Value, Value> {
   const bytes = state.bytes;
   let objectKeys: Value[] | undefined;
   for (; moreEntries(state, index, entryCount, headerOffset); index++) {
@@ -309,22 +348,21 @@ function readIntoMap(state: DecodeState, map: Map<Value, Value>, index: number, 
     map.set(key, readEntryValue(state, readValue));
   }
   checkDuplicates(state, map.size, index, headerOffset);
-  if (objectKeys !== undefined) checkObjectKeys(state, objectKeys, headerOffset, writeCanonical);
+  if (objectKeys !== undefined) checkObjectKeys(state, objectKeys, headerOffset);
   return map;
 }
 
 /** 'auto' mode met a non-text key: move the entries so far into a Map and continue there. */
-function continueAsMap(state: DecodeState, object: Record<string, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue, writeCanonical: WriteValue): Map<Value, Value> {
+function continueAsMap(state: DecodeState, object: Record<string, Value>, index: number, entryCount: number, headerOffset: number, readValue: ReadValue): Map<Value, Value> {
   if (index > 1) checkDuplicates(state, Object.keys(object).length, index, headerOffset);
-  return readIntoMap(state, new Map<Value, Value>(Object.entries(object)), index, entryCount, headerOffset, readValue, writeCanonical);
+  return readIntoMap(state, new Map<Value, Value>(Object.entries(object)), index, entryCount, headerOffset, readValue);
 }
 
 /** state.position is immediately after the map's initial byte. Text keys build
  * a plain object; Map is used in 'map' mode, or in 'auto' mode from the first
  * non-text key. The object loop stays in this function: one call deeper, it
- * was not reliably inlined and small-object decoding became bimodal.
- * writeCanonical is the deterministic writer, for comparing object keys. */
-export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue, writeCanonical: WriteValue): Value {
+ * was not reliably inlined and small-object decoding became bimodal. */
+export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue): Value {
   const bytes = state.bytes;
   const headerOffset = state.position - 1;
   const indefinite = additionalInfo === Info.Indefinite;
@@ -340,7 +378,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
     enterContainer(state, 2 * entryCount, headerOffset);
   }
   if (state.mapMode === 'map') {
-    const map = readIntoMap(state, new Map(), 0, entryCount, headerOffset, readValue, writeCanonical);
+    const map = readIntoMap(state, new Map(), 0, entryCount, headerOffset, readValue);
     leaveContainer(state);
     return map;
   }
@@ -357,7 +395,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
     } else if (state.mapMode === 'object') {
       return fail('unsupported-type', state.position, 'Map keys must be text strings (decode with maps: "auto" or "map")');
     } else {
-      const map = continueAsMap(state, object, index, entryCount, headerOffset, readValue, writeCanonical);
+      const map = continueAsMap(state, object, index, entryCount, headerOffset, readValue);
       leaveContainer(state);
       return map;
     }

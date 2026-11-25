@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fix: duplicate `Map` keys that are byte strings, arrays, maps or tags were not detected when decoding, because a `Map` tells such keys apart by identity. They are now compared as CBOR values (byte strings by their bytes, others by their deterministic encoding), so `{h'01': 1, h'01': 2}` is a `duplicate-key` error however the keys are encoded. Maps without such keys are unaffected; byte-string-keyed maps decode about 20% slower.
+- Fix: duplicate `Map` keys that are byte strings, arrays, maps or tags were not detected when decoding, because a `Map` tells such keys apart by identity. They are now compared as CBOR values (byte strings by their bytes, others by a fingerprint of the decoded value), so `{h'01': 1, h'01': 2}` is a `duplicate-key` error however the keys are encoded. Maps without such keys are unaffected. Maps with byte-string keys decode about 20% slower, and the rare maps with array or map keys about 4× slower. A decode-only bundle grows by 0.6 KB gzipped.
 - Tested in every runtime the README names: CI now runs the whole suite on Deno, and a portable conformance suite with no Node APIs on Bun, workerd (through Miniflare), and Chromium, Firefox and WebKit, on the page and in web workers.
 
 ## 1.0.1
