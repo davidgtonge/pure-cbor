@@ -51,7 +51,7 @@
     <div class="card">
       <span class="card-number" aria-hidden="true">1</span>
       <h3>Clean, functional code</h3>
-      <p>Pure functions over explicit state, in the spirit of OCaml. There are no classes apart from the error type, and no state kept between calls apart from a documented cache of decoded map keys. Tagged values and simple values are immutable variants, and the wire format is described by one named set of constants.</p>
+      <p>Pure functions over explicit state, in the spirit of OCaml. There are no classes apart from the error type, and no state kept between calls apart from two documented caches: decoded map keys, and one write function per encode-option set (which holds no data). Tagged values and simple values are immutable variants, and the wire format is described by one named set of constants.</p>
     </div>
     <div class="card">
       <span class="card-number" aria-hidden="true">2</span>
