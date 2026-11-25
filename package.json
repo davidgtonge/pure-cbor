@@ -41,7 +41,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit && oxlint -D correctness -D suspicious src",
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.mjs",
     "bench": "npm run build && node bench/bench.mjs",
@@ -53,6 +53,7 @@
     "prepublishOnly": "npm run lint && npm test"
   },
   "devDependencies": {
+    "oxlint": "^1.95.0",
     "typescript": "^5.8.3"
   },
   "engines": {

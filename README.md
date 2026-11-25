@@ -362,3 +362,11 @@ npm run bench:isolated
 ```
 
 The benchmark includes a public corpus in [bench/corpus](bench/corpus/README.md): cbor-x's own benchmark document, @msgpack/msgpack's sample data, and seeded Bluesky-style records and float meshes shaped like cborg's and rust_serialization_benchmark's workloads. `BENCH_MS`, `BENCH_ROUNDS` and `BENCH_FILTER` control timing and workload selection. Compare workloads with `bench:isolated`: workloads sharing a process skew each other's V8 type feedback by up to 2×. The harness disables cbor-x's native string extraction, so it compares pure JS with pure JS. Benchmarked on Node 22 only; browser and workerd performance remain unverified.
+
+## Releasing
+
+Releases are published from GitHub Actions with [npm trusted publishing](https://docs.npmjs.com/trusted-publishers): no npm token exists anywhere, and each version carries provenance linking it to the commit and workflow run that built it.
+
+1. Bump the version and add a CHANGELOG entry: `npm version patch` (or `minor`, `major`) commits and tags `vX.Y.Z`.
+2. `git push --follow-tags`.
+3. CI runs lint, the tests on Node 22, 24 and latest, the interoperability tests, and a packed-tarball check. The `publish` job then waits for approval of the `npm` environment, which accepts only `v*` tags.

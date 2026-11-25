@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# Every job is read-only unless it says otherwise; only `publish` gets more (an OIDC token for npm).
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+# Supply-chain notes:
+# - Actions are pinned to full commit SHAs (the comment gives the release), so a moved or hijacked tag
+#   can't change what runs here. Dependabot (.github/dependabot.yml) proposes updates.
+# - Tag builds, which get published, never restore a cache, so a cache written by another run can't
+#   leak into a release.
+
+env:
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  # Type check with the strict extras, then oxlint.
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '${{ matrix.node }}'
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+      - run: npm ci
+      - run: npm test
+
+  # The differential and interoperability tests, which skip when the other libraries are absent:
+  # random trees and the public corpus both ways with cbor-x and cborg, and every library's output
+  # read back. They are test-only and never part of the package.
+  interop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: ${{ env.RELEASE != 'true' && 'npm' || '' }}
+      - run: npm ci
+      - run: npm install --no-save --package-lock=false cbor-x cborg @levischuck/tiny-cbor cbor cbor2 cbor-js msgpackr @msgpack/msgpack
+      - name: Test, with nothing skipped
+        shell: bash # with pipefail, so a failing test run fails the step despite the tee
+        run: |
+          npm run build
+          node --test --test-reporter=tap test/*.test.mjs 2>&1 | tee test.log
+          grep -q '^# skipped 0$' test.log || { echo "::error::some interoperability tests were skipped"; exit 1; }
+
+  # Packs exactly what a release publishes, installs the tarball into a fresh project, and compiles a
+  # consumer against it: strict, without skipLibCheck, as users meet the types.
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24, package-manager-cache: false }
+      - run: npm ci
+      - run: npm run build
+      - run: npm pack --pack-destination "$RUNNER_TEMP"
+      - name: Install the tarball in a fresh project and compile against it
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir consumer && cd consumer
+          npm init -y >/dev/null && npm pkg set type=module
+          npm install --no-audit --no-fund ../pure-cbor-*.tgz typescript@5
+          cat > main.ts <<'EOF'
+          import { encode, decode, tryDecode, CborError, type Value } from 'pure-cbor';
+          const value: Value = { id: 7, tags: ['a'], when: new Date(0) };
+          const bytes: Uint8Array = encode(value, { deterministic: true });
+          const result = tryDecode(bytes);
+          if (!result.ok) throw result.error satisfies CborError;
+          console.log(decode(bytes));
+          EOF
+          echo '{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext", "target": "ES2022", "strict": true, "outDir": "out" } }' > tsconfig.json
+          npx tsc -p .
+          node out/main.js
+
+  # Runs only for a pushed tag like v1.0.1, after everything above passes, and only once someone
+  # approves the `npm` environment (Settings > Environments). Authenticates with npm trusted
+  # publishing: GitHub issues a short-lived OIDC token that npm accepts for packages that name this
+  # workflow and environment as their trusted publisher, so no npm token exists. npm also attaches
+  # provenance, linking the published version to this run and commit.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, interop, package]
+    runs-on: ubuntu-24.04
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/pure-cbor
+    permissions:
+      contents: read
+      id-token: write # the OIDC token npm trusted publishing (and provenance) needs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # No cache, and no registry-url: that option writes an .npmrc whose token placeholder can stop npm
+      # from trying OIDC.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24, package-manager-cache: false }
+      - name: Check npm is new enough for trusted publishing (11.5.1+)
+        run: |
+          npm --version
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)" \
+            || { echo "::error::npm $(npm --version) is too old for trusted publishing"; exit 1; }
+      # --ignore-scripts: no dependency gets to run code in the job that can publish.
+      - run: npm ci --ignore-scripts
+      - name: Check the tag matches package.json
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          [ "$version" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME but package.json is $version"; exit 1; }
+      # prepublishOnly runs the lint and the tests (which build dist) once more, on exactly this checkout.
+      - run: npm publish --access public
