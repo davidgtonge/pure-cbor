@@ -1,0 +1,36 @@
+{
+  "name": "cbor-fp",
+  "version": "0.6.0",
+  "private": true,
+  "description": "A small, functional, performance-oriented TypeScript CBOR subset",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "bench": "npm run build && node bench/bench.mjs",
+    "bench:compare": "npm run build && node bench/compare.mjs",
+    "bench:isolated": "npm run build && node bench/isolated.mjs",
+    "bench:stream": "npm run build && node bench/stream.mjs",
+    "bench:json": "npm run build && node bench/json.mjs",
+    "bench:cose": "npm run build && node bench/cose.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

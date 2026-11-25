@@ -1,0 +1,20 @@
+Node v22.16.0; 5 x 60 ms; median ns/op; old/new same run
+uint small decode	old prepared tuple: 16.9 ns	new prepared tuple: 18.4 ns	new readWhole: 13.9 ns	old decode: 81.3 ns	new decode: 75.1 ns
+uint small encode	old owned: 305.2 ns	new owned: 321.9 ns	new slab: 46.1 ns	old write: 8.9 ns	new write: 9.0 ns
+float64 decode	old prepared tuple: 23.5 ns	new prepared tuple: 19.7 ns	new readWhole: 18.0 ns	old decode: 86.2 ns	new decode: 77.3 ns
+float64 encode	old owned: 303.0 ns	new owned: 317.0 ns	new slab: 52.4 ns	old write: 11.6 ns	new write: 18.2 ns
+ASCII 8 decode	old prepared tuple: 65.1 ns	new prepared tuple: 45.1 ns	new readWhole: 42.0 ns	old decode: 139.4 ns	new decode: 102.1 ns
+ASCII 8 encode	old owned: 348.1 ns	new owned: 359.5 ns	new slab: 80.0 ns	old write: 41.4 ns	new write: 44.6 ns
+ASCII 16 decode	old prepared tuple: 114.5 ns	new prepared tuple: 62.7 ns	new readWhole: 60.5 ns	old decode: 199.8 ns	new decode: 121.1 ns
+ASCII 16 encode	old owned: 400.5 ns	new owned: 409.9 ns	new slab: 110.3 ns	old write: 68.5 ns	new write: 71.7 ns
+ASCII 32 decode	old prepared tuple: 138.0 ns	new prepared tuple: 112.2 ns	new readWhole: 109.1 ns	old decode: 238.0 ns	new decode: 170.3 ns
+ASCII 32 encode	old owned: 553.1 ns	new owned: 623.9 ns	new slab: 190.4 ns	old write: 132.4 ns	new write: 134.1 ns
+number[] 128 decode	old scalar tuple loop: 2760.0 ns	new scalar tuple loop: 3269.1 ns	new array direct: 705.6 ns
+number[] 128 encode	owned: 1426.2 ns	slab: 1145.6 ns	prepared: 1036.1 ns
+string[] 128 decode	old scalar tuple loop: 9625.7 ns	new scalar tuple loop: 6049.2 ns	new array direct: 4409.7 ns
+string[] 128 encode	owned: 9063.0 ns	slab: 6175.5 ns	prepared: 5513.4 ns
+mixed[] 128 decode	old scalar tuple loop: 6429.8 ns	new scalar tuple loop: 4623.6 ns	new array direct: 2860.9 ns
+mixed[] 128 encode	owned: 4850.8 ns	slab: 3540.4 ns	prepared: 3334.8 ns
+number[] 10000 decode	old scalar tuple loop: 281280.9 ns	new scalar tuple loop: 282380.3 ns	new array direct: 155278.2 ns
+number[] 10000 encode	owned: 133071.4 ns	slab: 181084.0 ns	prepared: 129453.4 ns
+Checksum: 206283128
