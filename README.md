@@ -3,7 +3,7 @@
 CBOR for JavaScript and TypeScript, with two promises:
 
 1. **Clean, functional code.** Pure functions over explicit state, in the spirit of OCaml: no classes (apart from the error type), no state kept between calls apart from two documented caches (decoded map keys, and one write function per encode-option set), immutable tagged variants, and one named set of wire constants. About 2,800 lines of strict TypeScript, with no runtime dependencies, no Node APIs and no generated code (CSP-safe).
-2. **The fastest pure-JavaScript CBOR library.** No native addon. On public benchmark data it decodes 1.21–1.72× faster than cbor-x, the next fastest of the six other CBOR libraries measured, and encodes from level with it (0.93× on a float-heavy mesh) to 1.55× faster (cbor-x also measured as pure JS, without its optional native addon). Small messages decoded from a fresh buffer are 5–13× faster. It isn't ahead everywhere: arrays of short strings and some mixed arrays are level, cbor-x encodes a COSE key 1.4× faster, and on WebAuthn and CWT messages pure-cbor matches cbor-x only with `binaryOwnership: 'borrow'`, since cbor-x returns views into the input by default while pure-cbor copies. On Node, cbor-x's optional native addon, which npm installs automatically there, makes it decode text-heavy data up to 1.26× faster than pure-cbor ([below](#speed)). Details in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
+2. **The fastest pure-JavaScript CBOR library.** No native addon. On public benchmark data it decodes 1.21–1.72× faster than cbor-x, the next fastest of the six other CBOR libraries measured, and encodes from level with it (0.93× on a float-heavy mesh) to 1.55× faster (cbor-x also measured as pure JS, without its optional native addon). Small messages decoded from a fresh buffer are 5–13× faster. It isn't ahead everywhere: arrays of short strings and some mixed arrays are level, cbor-x encodes a COSE key 1.4× faster, and on WebAuthn and CWT messages pure-cbor matches cbor-x only with `binaryOwnership: 'borrow'`, since cbor-x returns views into the input by default while pure-cbor copies. On Node, cbor-x's optional native addon, which npm installs automatically there, decodes arrays of very short strings about 1.4× faster than pure-cbor; on real text-heavy data pure-cbor is ahead of it too ([below](#speed)). Details in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
 
 It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple values, typed arrays), deterministic encoding, CBOR sequences over Web Streams, and COSE, CWT, WebAuthn and mdoc messages, checked against their published test vectors. Standard CBOR only: no private wire format.
 
@@ -11,7 +11,7 @@ It covers the whole RFC 8949 data model (tags, bignums, dates, `Map`, simple val
 
 ## Why pure-cbor
 
-- **Fast without tricks.** It is the fastest CBOR library measured that runs as pure JavaScript, with no native addon and no generated code. (On Node, cbor-x's native addon decodes text-heavy data faster: see [Speed](#speed).) It runs unchanged where those aren't allowed: browsers with a strict CSP, web workers and edge runtimes. The same suite passes on Node, Deno, Bun, workerd, Chromium, Firefox and WebKit.
+- **Fast without tricks.** It is the fastest CBOR library measured that runs as pure JavaScript, with no native addon and no generated code. (On Node, cbor-x's native addon is still faster on arrays of very short strings: see [Speed](#speed).) It runs unchanged where those aren't allowed: browsers with a strict CSP, web workers and edge runtimes. The same suite passes on Node, Deno, Bun, workerd, Chromium, Firefox and WebKit.
 - **Built for messages you have to trust.**
   - **Hostile input:** limits are checked before anything is allocated, and every failure is a typed `CborError` with a byte offset, never a stack overflow or an out-of-bounds read. Invalid UTF-8 and duplicate map keys are rejected by default, including byte-string, array and other container keys, which are compared as CBOR values.
   - **Signed data:** deterministic encoding, plus re-encoding signed data byte for byte.
@@ -44,23 +44,23 @@ Small messages, decoded from a new buffer each time, as a just-received message 
 
 **WebAuthn and COSE:** these messages are mostly byte strings. pure-cbor copies them by default, so they stay valid after the input changes, while cbor-x returns views into the input. Parsing 15 WebAuthn attestations takes 12.9 µs by default and 7.9 µs with `binaryOwnership: 'borrow'`, against cbor-x's 7.5 µs. On COSE_Sign1 messages pure-cbor is ahead even when copying (5.0 µs against 5.7 µs). Encoding a COSE key, cbor-x is 1.4× faster.
 
-**cbor-x with its native addon:** on Node, npm installs cbor-x's optional `cbor-extract` addon automatically. It only affects decoding text: one native call creates many upcoming strings at once. With it, cbor-x decodes text-heavy data faster than pure-cbor; without it (browsers, workers, Deno, or when it fails to install) the tables above apply. Decoding one value, median of three runs:
+**cbor-x with its native addon:** on Node, npm installs cbor-x's optional `cbor-extract` addon automatically. It only affects decoding text: one native call creates many upcoming strings at once. pure-cbor does the same in pure JavaScript (one `TextDecoder` call for a window of nearby strings), so it stays ahead on real text-heavy data even against the addon. Measured on `main` after 1.0.2; decoding one value, median of three runs:
 
 | Decode | pure-cbor | cbor-x, pure JS | cbor-x, native addon | pure-cbor vs native |
 |---|---:|---:|---:|---:|
-| 100 Bluesky-style records | 87.5 µs | 134.6 µs | 75.4 µs | 0.86× |
-| msgpack sample-large | 23.7 µs | 40.9 µs | 23.1 µs | 0.98× |
-| cbor-x's benchmark document | 36.9 µs | 44.7 µs | 37.9 µs | **1.03×** |
-| 128 short strings | 4.41 µs | 4.16 µs | 3.50 µs | 0.79× |
-| 2 KB of text | 0.47 µs | 0.45 µs | 0.42 µs | 0.89× |
-| 100 object rows | 40.8 µs | 57.6 µs | 56.2 µs | **1.38×** |
+| 100 Bluesky-style records | 36.3 µs | 71.0 µs | 39.9 µs | **1.10×** |
+| msgpack sample-large | 10.6 µs | 21.4 µs | 12.2 µs | **1.15×** |
+| cbor-x's benchmark document | 19.1 µs | 23.1 µs | 20.2 µs | **1.05×** |
+| 128 short strings | 2.62 µs | 2.17 µs | 1.84 µs | 0.72× |
+| 2 KB of text | 0.25 µs | 0.24 µs | 0.22 µs | 0.88× |
+| 100 object rows | 21.4 µs | 30.6 µs | 29.7 µs | **1.39×** |
 
-The addon's edge comes from creating strings in C++, where turning bytes into a string needs no per-string JavaScript work: no `TextDecoder` call, no typed-array view and no byte loop. Three pure-JavaScript versions of the same idea were built and measured, and all were slower than pure-cbor's current decoder on real data; [BENCHMARK.md](BENCHMARK.md#cbor-x-with-its-native-addon) explains why.
+The addon still wins on arrays of very short strings and on a single long string, where C++ creates each string without any per-string JavaScript work. [BENCHMARK.md](BENCHMARK.md#cbor-x-with-its-native-addon) explains the trick and how pure-cbor does it without native code.
 
 **How this was measured:**
 
 - pure-cbor 1.0.2 on Node 22.19, macOS arm64, 25 November 2026, with the machine otherwise idle. The public-data rows are the median of three full runs; the other rows are from one run.
-- In the tables above cbor-x runs as pure JavaScript, without its optional native addon; the native comparison was measured separately, on battery power, with cbor-x 1.6.9 and cbor-extract 2.2.3. cborg uses its defaults, which sort map keys and shrink floats: extra work pure-cbor doesn't do.
+- In the tables above cbor-x runs as pure JavaScript, without its optional native addon; the native comparison was measured separately, on `main` after 1.0.2, with cbor-x 1.6.9 and cbor-extract 2.2.3. cborg uses its defaults, which sort map keys and shrink floats: extra work pure-cbor doesn't do.
 - Each workload runs in its own process; the result is the median of 5 rounds. Treat anything within about ±10% of 1.0× as level.
 - Where pure-cbor is level or behind (arrays of short strings, long text from a reused buffer, some small mixed arrays and objects), the reasons and every other workload are in [BENCHMARK.md](BENCHMARK.md#reading-the-results).
 
@@ -424,6 +424,7 @@ Each choice below was measured, and the reasons are also commented in the code.
 - **Decoded-key cache:** a 1,024-slot table returns the same string for repeated keys of up to 32 bytes. Hits are confirmed byte for byte, and only keys that decoded as valid UTF-8 are stored. One-character ASCII keys bypass it, because V8 already interns those.
 - **Duplicate keys** are detected by comparing the object's key count with the entry count once per map, about 4× cheaper than checking each key. The error points at the map header.
 - **Array decode** preallocates the result (1.6× faster than `push`; holey arrays had no measurable cost for consumers) and decodes scalars inline with no per-element tuples.
+- **Medium ASCII text** (16–255 bytes, inside a container) is sliced from a window of the input: up to 4 KiB, masked to 7 bits and decoded with one `TextDecoder` call, instead of one ~130 ns call per string. Bluesky-style records decode 1.24× faster with it. A string that is a slice keeps its window alive while it's referenced, as with the byte-string arena.
 - **Short ASCII text** (up to 32 bytes) is checked 8 bytes at a time, with tails built by a single exact-arity `fromCharCode` call. Short non-ASCII text uses a strict JS UTF-8 decoder that defers to `TextDecoder` on anything malformed, so strict and replacement semantics are exactly the native ones.
 - **Typed arrays** use bulk `Uint8Array.set`. Overlapping source and destination views are supported.
 

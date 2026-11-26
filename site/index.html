@@ -220,10 +220,18 @@
   </header>
   <section class="topic">  <h3 id="principles-explicit-state">1. Explicit state over hidden state</h3>
   <p>A decoder needs a cursor, a nesting depth and some limits. Rather than keeping them in a class instance or module variables, pure-cbor puts them in one plain record. The record is created for a single decode call and passed down by argument, so every function that touches it says so in its signature.</p>
-<figure class="code" data-source="src/state.ts" data-lines="9-27,33-35"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** Explicit state for decoding one container tree. Created per decode call
+<figure class="code" data-source="src/state.ts" data-lines="9-35,41-43"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** Explicit state for decoding one container tree. Created per decode call
  * (only when the value is an array or map) and passed down; nothing is
  * shared between calls. */
-export interface DecodeState {
+/** The current text window (see string.ts): part of the input, masked to
+ * ASCII and decoded with one TextDecoder call, that medium-length ASCII
+ * strings are sliced from. Empty until the first such string. */
+export interface TextWindow {
+  windowStart: number;
+  windowText: string;
+}
+
+export interface DecodeState extends TextWindow {
   readonly bytes: Uint8Array;
   /** Cursor: the next unread byte. */
   position: number;
@@ -239,7 +247,7 @@ export interface DecodeState {
   /** Byte strings copied during this decode (see arena.ts). */
   arena: Uint8Array | undefined;
   arenaUsed: number;
-  // …
+// …
   readonly rejectDuplicateKeys: boolean;
   readonly mapMode: 'auto' | 'object' | 'map';
 }</code></pre></figure>
@@ -462,17 +470,17 @@ export const enum Info { OneByte = 24, EightBytes = 27, Indefinite = 31 }
 /** Whole initial bytes. */
 export const enum Token { Float64 = 0xfb, Break = 0xff }</code></pre></figure>
   <p>Here they are in the array decoder's hot loop:</p>
-<figure class="code" data-source="src/array.ts" data-lines="93-103"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/array.ts">src/array.ts</a></figcaption><pre><code class="language-ts">const majorType = token &gt;&gt;&gt; 5;
-const elementInfo = token &amp; 31;
-if (majorType === Major.Text &amp;&amp; elementInfo !== Info.Indefinite) {
-  const byteLength = readArgumentValue(bytes, position, elementInfo);
-  position = argumentEnd(position, elementInfo);
-  values[index] = StringCodec.readPayload(bytes, position, byteLength, state.options);
-  position += byteLength;
-} else if (majorType === Major.Unsigned &amp;&amp; elementInfo &lt; Info.EightBytes) {
-  values[index] = readArgumentValue(bytes, position, elementInfo);
-  position = argumentEnd(position, elementInfo);
-} else if (majorType &lt;= Major.Negative) { // unsigned or negative, including 64-bit arguments (maybe bigints)</code></pre></figure></section>
+<figure class="code" data-source="src/array.ts" data-lines="93-103"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/array.ts">src/array.ts</a></figcaption><pre><code class="language-ts">    const majorType = token &gt;&gt;&gt; 5;
+    const elementInfo = token &amp; 31;
+    if (majorType === Major.Text &amp;&amp; elementInfo !== Info.Indefinite) {
+      const byteLength = readArgumentValue(bytes, position, elementInfo);
+      position = argumentEnd(position, elementInfo);
+      values[index] = StringCodec.readPayload(bytes, position, byteLength, state.options, state);
+      position += byteLength;
+    } else if (majorType === Major.Unsigned &amp;&amp; elementInfo &lt; Info.EightBytes) {
+      values[index] = readArgumentValue(bytes, position, elementInfo);
+      position = argumentEnd(position, elementInfo);
+    } else if (majorType &lt;= Major.Negative) { // unsigned or negative, including 64-bit arguments (maybe bigints)</code></pre></figure></section>
   <section class="topic">  <h3 id="principles-readable-names">5. Readable names, even in hot paths</h3>
   <p>The fastest loops in the library still use whole words: <code>position</code>, <code>token</code>, <code>additionalInfo</code>, <code>byteLength</code>. Comments explain each non-obvious choice and the measurement behind it. This is the start of the array decoder, the loop that runs once per element:</p>
 <figure class="code" data-source="src/array.ts" data-lines="64-92"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/array.ts">src/array.ts</a></figcaption><pre><code class="language-ts">// Preallocated (holey) beats push by ~1.6x here; holey elements had no
@@ -505,7 +513,7 @@ for (let index = 0; index &lt; length; index++) {
     continue;
   }</code></pre></figure>
   <p>Even an eight-bytes-at-a-time ASCII decoder spells its bytes out:</p>
-<figure class="code" data-source="src/string.ts" data-lines="114-131"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">/** Short ASCII: checks 8 bytes at a time and builds 8 characters per call.
+<figure class="code" data-source="src/string.ts" data-lines="115-132"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">/** Short ASCII: checks 8 bytes at a time and builds 8 characters per call.
  * Returns undefined at the first non-ASCII byte. */
 function decodeAscii(bytes: Uint8Array, start: number, end: number): string | undefined {
   let position = start;
@@ -914,7 +922,7 @@ function writeMapItem(writer: Writer, position: number, item: Value, depth: numb
 }</code></pre></figure></section>
       <section class="step" data-nodes="text" data-bytes="1-3 5-9 10-13" data-note="Both keys and 'Ada' are text: a header (62, 64, 63) holding the length, then the UTF-8 bytes.">  <h3 id="encode-strings">10. Strings: reserve, write, patch</h3>
   <p>Text uses the same trick as objects. The header is reserved for the string's UTF-16 length, the UTF-8 bytes are written, and the header is corrected afterwards, moving the payload only if the width changed. When the destination is tight, the exact size is computed first so a capacity error never leaves a partial write.</p>
-<figure class="code" data-source="src/string.ts" data-lines="97-112"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">/** Common path is single-pass into spare capacity, back-patching the header.
+<figure class="code" data-source="src/string.ts" data-lines="98-113"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">/** Common path is single-pass into spare capacity, back-patching the header.
  * Tight buffers get exact sizing first, so an insufficient-capacity error never
  * partially writes the destination. */
 export function write(bytes: Uint8Array, offset: number, value: string): number {
@@ -1095,7 +1103,7 @@ export function readWhole(buffer: Binary, options?: DecodeOptions): Value {
 }</code></pre></figure></section>
       <section class="step" data-nodes="state" data-bytes="0" data-note="The map declares 2 entries, so 4 items are taken from the budget, and the remaining bytes must hold at least 4.">  <h3 id="decode-create-state">3. <code>createState()</code> and the limits</h3>
   <p>The state record is built once, with its limits already validated. Its item budget starts at the number of bytes left. Every container subtracts its declared item count on entry; since each item needs at least one byte, a valid message can never exceed its own length.</p>
-<figure class="code" data-source="src/state.ts" data-lines="60-93"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** position is immediately after the container's initial byte. */
+<figure class="code" data-source="src/state.ts" data-lines="68-103"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** position is immediately after the container's initial byte. */
 export function createState(bytes: Uint8Array, position: number, options: DecodeOptions | undefined): DecodeState {
   const headerOffset = position - 1;
   const limits = containerLimits(options, headerOffset);
@@ -1108,6 +1116,8 @@ export function createState(bytes: Uint8Array, position: number, options: Decode
     floatView: undefined,
     arena: undefined,
     arenaUsed: 0,
+    windowStart: 0,
+    windowText: '',
     useArena: options?.binaryOwnership === undefined || options.binaryOwnership === 'copy',
     maxArrayLength: limits.maxArrayLength,
     maxMapEntries: limits.maxMapEntries,
@@ -1159,7 +1169,7 @@ export function readValue(state: DecodeState): Value {
         // Definite text inline: no result tuple on the most common path.
         const byteLength = readArgumentValue(bytes, position, additionalInfo);
         const start = argumentEnd(position, additionalInfo);
-        const value = StringCodec.readPayload(bytes, start, byteLength, state.options);
+        const value = StringCodec.readPayload(bytes, start, byteLength, state.options, state);
         state.position = start + byteLength;
         return value;
       }
@@ -1205,13 +1215,13 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
   // Each element requires at least one byte, even for empty text.
   readable(bytes, position, length);
   enterContainer(state, length, headerOffset);
-    // …
+// …
     const majorType = token &gt;&gt;&gt; 5;
     const elementInfo = token &amp; 31;
     if (majorType === Major.Text &amp;&amp; elementInfo !== Info.Indefinite) {
       const byteLength = readArgumentValue(bytes, position, elementInfo);
       position = argumentEnd(position, elementInfo);
-      values[index] = StringCodec.readPayload(bytes, position, byteLength, state.options);
+      values[index] = StringCodec.readPayload(bytes, position, byteLength, state.options, state);
       position += byteLength;
     } else if (majorType === Major.Unsigned &amp;&amp; elementInfo &lt; Info.EightBytes) {
       values[index] = readArgumentValue(bytes, position, elementInfo);
@@ -1362,7 +1372,7 @@ function readTextKey(state: DecodeState, token: number): string {
   if (byteLength === 1 &amp;&amp; bytes[start] &lt; 0x80) return String.fromCharCode(bytes[start]);
   const cached = KeyCache.lookup(bytes, start, byteLength);
   if (cached !== undefined) return cached;
-  const key = StringCodec.readPayload(bytes, start, byteLength, state.options);
+  const key = StringCodec.readPayload(bytes, start, byteLength, state.options, state);
   if (state.options?.invalidUtf8 !== 'replace') KeyCache.remember(bytes, start, byteLength, key);
   return key;
 }</code></pre></figure>
@@ -1395,20 +1405,43 @@ export function remember(bytes: Uint8Array, start: number, byteLength: number, k
   slotKeys[slot] = key;
 }</code></pre></figure></section>
       <section class="step" data-nodes="text" data-bytes="10-13" data-out="name-value" data-note="'Ada' is short ASCII, decoded in JavaScript without calling TextDecoder.">  <h3 id="decode-text">8. Text</h3>
-  <p>Short text, up to 32 bytes, is decoded in JavaScript: ASCII eight bytes at a time, then a strict UTF-8 decoder. Anything those don't accept goes to the native <code>TextDecoder</code>, so strict and replacement behaviour are exactly the native ones. <code>readPayload</code> is kept small so V8 can inline it into the array and map loops.</p>
-<figure class="code" data-source="src/string.ts" data-lines="185-205"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">/** Kept small so V8 can inline it into hot array and map loops; the native
- * decoder and its error handling live in decodeNative. */
-export function readPayload(bytes: Uint8Array, start: number, byteLength: number, options: DecodeOptions | undefined): string {
+  <p>Short text, up to 32 bytes, is decoded in JavaScript: ASCII eight bytes at a time, then a strict UTF-8 decoder. Anything those don't accept goes to the native <code>TextDecoder</code>, so strict and replacement behaviour are exactly the native ones. <code>readPayload</code> is kept small so V8 can inline it into the array and map loops. Inside a container, an ASCII string of 33–255 bytes starts a <em>window</em>: up to 4 KiB of the input, masked to 7 bits and decoded with one <code>TextDecoder</code> call. Strings of 16 bytes or more inside it are slices, so many strings cost one call instead of one each. Bluesky-style records decode 1.24× faster with it.</p>
+<figure class="code" data-source="src/string.ts" data-lines="186-202,247-272"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">/** Kept small so V8 can inline it into hot array and map loops; the native
+ * decoder and its error handling live in decodeNative. A container decode
+ * passes its state as `window`; a single top-level string has none. */
+export function readPayload(bytes: Uint8Array, start: number, byteLength: number, options: DecodeOptions | undefined, window?: TextWindow): string {
   readable(bytes, start, byteLength);
   const end = start + byteLength;
   if (byteLength &lt;= SHORT_DECODE) {
+    // Inside a window already decoded, even a short string is cheaper as a slice.
+    if (window !== undefined &amp;&amp; byteLength &gt;= MIN_SLICED &amp;&amp; inWindow(window, start, end) &amp;&amp; isAscii(bytes, start, end)) {
+      return window.windowText.slice(start - window.windowStart, end - window.windowStart);
+    }
     const decoded = decodeAscii(bytes, start, end) ?? decodeShortUtf8(bytes, start, end);
     if (decoded !== undefined) return decoded;
   }
-  return decodeNative(bytes, start, end, options);
+  return decodeNative(bytes, start, end, options, window);
 }
 
-function decodeNative(bytes: Uint8Array, start: number, end: number, options: DecodeOptions | undefined): string {
+// …
+
+/** The ASCII string at [start, end) as a slice of the current window, or of
+ * a new window starting at `start`. */
+function sliceWindow(window: TextWindow, bytes: Uint8Array, start: number, end: number): string {
+  if (!inWindow(window, start, end)) {
+    const length = Math.min(bytes.length - start, WINDOW_BYTES);
+    windowScratch.set(bytes.subarray(start, start + length));
+    for (let index = 0; index &lt; (length + 3) &gt;&gt;&gt; 2; index++) windowWords[index] &amp;= 0x7f7f7f7f;
+    window.windowText = strictDecoder.decode(windowScratch.subarray(0, length));
+    window.windowStart = start;
+  }
+  return window.windowText.slice(start - window.windowStart, end - window.windowStart);
+}
+
+function decodeNative(bytes: Uint8Array, start: number, end: number, options: DecodeOptions | undefined, window: TextWindow | undefined): string {
+  if (window !== undefined &amp;&amp; end - start &lt; WINDOW_MAX_STRING &amp;&amp; isAscii(bytes, start, end)) {
+    return sliceWindow(window, bytes, start, end);
+  }
   try {
     const decoder = options?.invalidUtf8 === 'replace' ? lenientDecoder : strictDecoder;
     return decoder.decode(bytes.subarray(start, end));
@@ -1494,7 +1527,7 @@ export function decodeTag(tag: number, content: Value, options: DecodeOptions | 
     <li>Duplicate map keys are rejected by default, and invalid UTF-8 is rejected by default.</li>
   </ul>
   <p>It is also clear about what this is not: a full memory-budget guarantee. Apply message byte limits at the transport boundary too. The limits are validated once, by a function shared with the streaming scanner so both report the same errors:</p>
-<figure class="code" data-source="src/state.ts" data-lines="37-58"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">function validLimit(value: number | undefined, fallback: number, code: ErrorCode, name: string, offset: number): number {
+<figure class="code" data-source="src/state.ts" data-lines="45-66"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">function validLimit(value: number | undefined, fallback: number, code: ErrorCode, name: string, offset: number): number {
   if (value === undefined) return fallback;
   if (!Number.isSafeInteger(value) || value &lt; 0) fail(code, offset, `Invalid ${name}`);
   return value;
@@ -2104,7 +2137,7 @@ export async function* decodeSequence(source: ByteSource, options: SequenceDecod
       <li><strong>Long text from a reused buffer</strong> (ASCII 4096): about 0.9×. pure-cbor's <code>TextDecoder</code> is strict and rejects invalid UTF-8; cbor-x's replaces it. With fresh input they are level.</li>
       <li><strong>Encoding 64-byte strings</strong>: cborg is 8% faster (0.92×). Mixed arrays and the nested config object are level within noise.</li>
       <li><strong>COSE and WebAuthn</strong>: pure-cbor copies byte strings by default, while cbor-x returns views into the input. It matches cbor-x only with <code>binaryOwnership: 'borrow'</code>.</li>
-      <li><strong>cbor-x with its native addon</strong>, which npm installs on Node: it decodes text-heavy data faster, up to 1.26× on arrays of short strings and 1.16× on the Bluesky records. The addon creates many strings in one C++ call; BENCHMARK.md explains why the same trick loses in pure JavaScript.</li>
+      <li><strong>cbor-x with its native addon</strong>, which npm installs on Node: it creates many strings in one C++ call, and still decodes arrays of very short strings about 1.4× faster. pure-cbor does the same trick in JavaScript, one <code>TextDecoder</code> call per window of nearby strings, and is ahead of the addon on real text-heavy data (BENCHMARK.md has the numbers).</li>
       <li><strong>cbor-x records mode</strong>, a non-standard wire format, decodes 100 rows about 2.6× faster than pure-cbor by generating readers with <code>new Function</code>. pure-cbor stays standard CBOR and avoids code generation.</li>
     </ul>
     <p>The full tables, including fresh-input decoding, are <a href="#performance-full-tables">at the end of this part</a>; the streaming numbers are in <a href="#streaming-streaming-numbers">Streaming</a>.</p>
@@ -2234,7 +2267,7 @@ export function measureObject(object: ValueObject, upper: boolean, depth: number
   <section class="topic">  <h3 id="performance-arrays-and-text">Arrays and short text</h3>
   <p><strong>Array decode preallocates the result</strong>, measured 1.6× faster than <code>push</code>; holey arrays had no measurable cost for consumers. Scalars are decoded inline with no per-element tuples.</p>
   <p><strong>Short ASCII text</strong> (up to 32 bytes) is checked 8 bytes at a time, and the tail is built by a single exact-arity <code>fromCharCode</code> call. Short non-ASCII text uses a strict JavaScript UTF-8 decoder that defers to <code>TextDecoder</code> on anything malformed. On reused input, ASCII 32 decodes in 53 ns against cbor-x's 119 ns.</p>
-<figure class="code" data-source="src/string.ts" data-lines="6-15"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">const encoder = new TextEncoder();
+<figure class="code" data-source="src/string.ts" data-lines="7-16"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/string.ts">src/string.ts</a></figcaption><pre><code class="language-ts">const encoder = new TextEncoder();
 // ignoreBOM: true preserves an initial U+FEFF as part of the CBOR string.
 const strictDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const lenientDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
@@ -2423,7 +2456,7 @@ npm test</code></pre></figure></section>
     <figcaption>Imports point down the layers, or across within one (for example <code>sequence.ts</code> uses <code>allocation.ts</code>'s <code>encode</code>, and <code>map.ts</code> uses <code>keys.ts</code>). Nothing below <code>codec.ts</code> imports it: <code>array.ts</code> and <code>map.ts</code> receive <code>readValue</code> and <code>writeValue</code> as arguments.</figcaption>
   </figure>
   <p>That last point is visible in the signatures. The dispatcher types are declared next to the state they act on:</p>
-<figure class="code" data-source="src/state.ts" data-lines="95-96"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** The item dispatcher, passed to container codecs so they need not import it. */
+<figure class="code" data-source="src/state.ts" data-lines="105-106"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** The item dispatcher, passed to container codecs so they need not import it. */
 export type ReadValue = (state: DecodeState) =&gt; Value;</code></pre></figure>
 <figure class="code" data-source="src/writer.ts" data-lines="55-58"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/writer.ts">src/writer.ts</a></figcaption><pre><code class="language-ts">/** Dispatchers passed to container codecs so they need not import codec.ts.
  * depth is the nesting level of the value's container. */

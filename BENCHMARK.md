@@ -219,34 +219,33 @@ The tables above run cbor-x as pure JavaScript. On Node, npm also installs its o
 
 **What it does.** It only affects decoding text. On the first text string, one native call scans ahead through the CBOR and creates up to 256 upcoming strings. Runs of nearby ASCII strings become a single string (`napi_create_string_latin1`), and each CBOR string is handed out as a slice of it. Encoding is unaffected.
 
-**Measured.** Decoding one value per operation, each library in its own process, median of 7 rounds; the table is the median of three such runs. Node 22.19, macOS arm64, on battery power; cbor-x 1.6.9, cbor-extract 2.2.3. "pure-cbor vs native" is cbor-x's native time divided by pure-cbor's; above 1 means pure-cbor is faster.
+**Measured.** Decoding one value per operation, each library in its own process, median of 7 rounds; the table is the median of three such runs. pure-cbor from `main` after 1.0.2 (with text windows, below), Node 22.19, macOS arm64; cbor-x 1.6.9, cbor-extract 2.2.3. "pure-cbor vs native" is cbor-x's native time divided by pure-cbor's; above 1 means pure-cbor is faster.
 
 | Decode | pure-cbor | cbor-x, pure JS | cbor-x, native addon | pure-cbor vs native |
 | --- | ---: | ---: | ---: | ---: |
-| 100 Bluesky-style records | 87.5 µs | 134.6 µs | 75.4 µs | 0.86× |
-| msgpack sample-large | 23.7 µs | 40.9 µs | 23.1 µs | 0.98× |
-| cbor-x's benchmark document | 36.9 µs | 44.7 µs | 37.9 µs | 1.03× |
-| 128 short strings | 4.41 µs | 4.16 µs | 3.50 µs | 0.79× |
-| 2 KB of text | 0.47 µs | 0.45 µs | 0.42 µs | 0.89× |
-| 100 object rows | 40.8 µs | 57.6 µs | 56.2 µs | 1.38× |
+| 100 Bluesky-style records | 36.3 µs | 71.0 µs | 39.9 µs | **1.10×** |
+| msgpack sample-large | 10.6 µs | 21.4 µs | 12.2 µs | **1.15×** |
+| cbor-x's benchmark document | 19.1 µs | 23.1 µs | 20.2 µs | **1.05×** |
+| 128 short strings | 2.62 µs | 2.17 µs | 1.84 µs | 0.72× |
+| 2 KB of text | 0.25 µs | 0.24 µs | 0.22 µs | 0.88× |
+| 100 object rows | 21.4 µs | 30.6 µs | 29.7 µs | **1.39×** |
 
-The addon makes cbor-x 1.02–1.8× faster on these. With it, cbor-x decodes text-heavy data faster than pure-cbor (Bluesky records 1.16×, short-string arrays 1.26×), is level on sample-large, and stays behind on objects with short repeated keys (pure-cbor's key cache) and on numbers and floats, which it doesn't touch.
+The addon makes cbor-x 1.1–2× faster on text. pure-cbor is ahead of it on the three text-heavy datasets and on objects with short repeated keys (its key cache). The addon still wins on arrays of very short strings (1.4×) and on one long string (1.14×), where C++ creates each string with no per-string JavaScript work.
 
-**Why pure-cbor doesn't do the same in JavaScript.** Three pure-JavaScript versions of the batch were built and measured against the current decoder. Each looked ahead through the CBOR the same way and served strings as slices of one decoded block. Medians of three runs, each version timed alongside the current decoder and cbor-x, so the columns come from separate runs:
+**Doing the same in JavaScript.** Turning bytes into a string costs about 130 ns per `TextDecoder` call, whatever the length, so for strings over 32 bytes the call is most of the cost. Three earlier pure-JavaScript versions of the batch were built and measured, and all were slower on real data (medians of three runs, measured on battery power, so slower than the table above):
 
-| Decode, µs | Current | Packed by a JS loop | Packed with `set()` | One span, no copy | cbor-x native |
+| Decode, µs | Before | Packed by a JS loop | Packed with `set()` | One span, no copy | cbor-x native |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 100 Bluesky-style records | 85.7 | 99.2 | 97.9 | 120.3 | 75.3 |
 | msgpack sample-large | 24.0 | 28.0 | 40.0 | 35.4 | 22.8 |
 | cbor-x's benchmark document | 35.6 | 43.2 | 42.9 | 54.2 | 37.7 |
-| 64 strings of 25–64 bytes | 9.4 | 8.1 | 8.0 | 6.5 | 3.3 |
 
-They help only on strings of medium length with nothing awkward between them, and lose on real data, for three reasons:
-- **Every way to turn bytes into a string costs something per string in JavaScript:** a `TextDecoder` call (about 130 ns, at any length up to 128 bytes), a typed-array view to copy from (the top cost in the profile of the `set()` version), or a loop over the bytes. C++ pays none of these.
-- **`TextDecoder('latin1')` is really Windows-1252.** It maps bytes 0x80–0x9F, which CBOR uses for array headers and length bytes, to characters above U+00FF. So a span containing one becomes a two-byte string, and so does every slice of it. The addon uses true ISO-8859-1, which V8 stores one byte per character.
-- **Even one extra call in the array loop's text path costs about 15%** on short-string arrays, by spending V8's inlining budget.
+They taught three things:
+- **Every JavaScript route from bytes to string costs per string:** a `TextDecoder` call, a typed-array view to copy from, or a loop over the bytes. Only one call covering many strings saves anything.
+- **`TextDecoder('latin1')` is really Windows-1252.** It maps bytes 0x80–0x9F, which CBOR uses for array headers and length bytes, to characters above U+00FF. So a span containing one becomes a two-byte string, and so does every slice of it. It is also slow: 1.2–1.8 ns per byte on Node 22–26, against 0.1 ns for UTF-8.
+- **Extra work in the array loop's text path costs about 15%** on short-string arrays, by spending V8's inlining budget.
 
-So pure-cbor keeps its per-string paths: 8 bytes at a time in JavaScript up to 32 bytes, where that beats a `TextDecoder` call, and `TextDecoder` above.
+**What works.** When a container holds an ASCII string of 33–255 bytes, the decoder copies up to 4 KiB of the input from there into a reused scratch buffer, masks every byte to 7 bits, and decodes it with one UTF-8 `TextDecoder` call. Masking makes the window pure ASCII, so it decodes one byte to one character at the fastest rate; only bytes outside strings (headers, numbers) change, and those are never read as text. Every ASCII string of 16–255 bytes inside the window is then a slice of it. Strings up to 32 bytes keep the JavaScript fast path until a window exists, and the hot loops are untouched. Against the decoder before this, in three alternating runs: Bluesky records 1.24×, sample-large 1.17×, everything else within noise. The trade-off, as with the byte-string arena: a decoded string that is a slice keeps its window (at most 4 KiB) alive while it is referenced.
 
 ## Real-world flows: WebAuthn, COSE, CWT, mdoc
 
