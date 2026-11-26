@@ -1,15 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
-- `mapKeys: 'integer-or-text'`: a `Map` key that isn't an integer or text is an `unsupported-type` error at the key's offset. Without it, a float key `1.0` decodes as `1`, so `{1.0: -7}` and `{1: -7}` were both accepted; COSE labels must be integers or text.
-- `tags` entries may be `'tagged'` (keep the tag as a `Tagged` value, skipping built-in conversions such as typed arrays, dates and bignums) or `'reject'` (an `unsupported-tag` error at the tag's header, before its content is read), as well as decoders.
-- `unknownTags: 'reject'` now also rejects tag 55799 (self-described CBOR), which was always unwrapped. An explicit `tags` entry for 55799 still wins.
-- `STRICT_DECODE`: frozen decode options for security formats (COSE, CWT, WebAuthn, mdoc): `Map` everywhere, integer or text keys, duplicate keys, invalid UTF-8 and unknown tags rejected, typed-array tags kept as `Tagged`, and tag 55799 rejected.
-- `LabelMap` type (`ReadonlyMap<number | string, Value>`), part of `Value`, so integer- and text-keyed maps encode without a cast.
-- Faster decoding of text-heavy data: ASCII strings of 16–255 bytes inside a container are sliced from a window of the input decoded with one `TextDecoder` call (the window is masked to 7 bits, so it decodes as one byte per character). 100 Bluesky-style records decode 1.24× faster and msgpack's sample-large 1.17×, ahead of cbor-x with its native addon; other workloads are unchanged within noise. As with the byte-string arena, a decoded string that is a slice keeps its window (at most 4 KiB) alive.
-- Faster encoding of outputs over 64 KiB: the staging buffer is now kept up to 256 KiB between calls. At 64 KiB, every larger output regrew it and copied its first 64 KB again. Measured under the same conditions, a 130 KB float mesh encodes about 4% faster and a 90 KB float array about 19% faster. A process keeps at most 256 KiB for this after a large encode.
-- Docs: cbor-x's optional native addon (installed automatically on Node) decodes text-heavy data up to 1.26× faster than pure-cbor. The README and BENCHMARK.md now say so, with measurements, and the second promise reads "the fastest pure-JavaScript CBOR library". BENCHMARK.md also records three pure-JavaScript attempts at the addon's batching trick, all slower on real data.
+Strict decoding, for formats that carry signatures (requested by pure-cose):
+
+- **`mapKeys: 'integer-or-text'`:** a `Map` key that isn't an integer or text is an `unsupported-type` error at the key's offset. Without it, a float key `1.0` decodes as `1`, so `{1.0: -7}` passed for `{1: -7}`. COSE labels must be integers or text.
+- **`tags` entries** may be `'tagged'` (keep the tag as a `Tagged` value, skipping built-in conversions such as typed arrays, dates and bignums) or `'reject'` (an `unsupported-tag` error at the tag's header, before its content is read), as well as decoders.
+- **`STRICT_DECODE`:** frozen decode options for COSE, CWT, WebAuthn and mdoc: `Map` everywhere, integer or text keys, duplicate keys, invalid UTF-8 and unknown tags rejected, typed-array tags kept as `Tagged`, and tag 55799 rejected.
+- **`LabelMap`:** a type for `ReadonlyMap<number | string, Value>`, part of `Value`, so integer- and text-keyed maps encode without a cast.
+
+Behaviour change:
+
+- `unknownTags: 'reject'` now also rejects tag 55799 (self-described CBOR), which was always unwrapped. An explicit `tags` entry for 55799 still wins. With the default `unknownTags: 'tagged'`, nothing changes.
+
+Faster:
+
+- **Text-heavy decoding:** ASCII strings of 16–255 bytes inside a container are sliced from a window of the input decoded with one `TextDecoder` call (masked to 7 bits, so it decodes one byte per character), instead of one call per string. 100 Bluesky-style records decode 1.24× faster and msgpack's sample-large 1.17×. pure-cbor is now ahead of cbor-x even with its native addon on real text-heavy data; the addon still wins on arrays of very short strings. As with the byte-string arena, a decoded string that is a slice keeps its window (at most 4 KiB) alive.
+- **Encoding outputs over 64 KiB:** the staging buffer is now kept up to 256 KiB between calls, instead of being regrown on every large encode. A 130 KB float mesh encodes about 4% faster and a 90 KB float array about 19% faster. A process keeps at most 256 KiB for this after a large encode.
+
+Docs: the README and BENCHMARK.md compare pure-cbor with cbor-x's native addon, and record what did and didn't work in doing its trick in JavaScript.
 
 ## 1.0.2
 
