@@ -39,6 +39,8 @@ export interface DecodeState extends TextWindow {
   readonly maxMapEntries: number;
   readonly maxDepth: number;
   readonly rejectDuplicateKeys: boolean;
+  /** mapKeys: 'integer-or-text': Map keys must be integers or text. */
+  readonly integerOrTextKeys: boolean;
   readonly mapMode: 'auto' | 'object' | 'map';
 }
 
@@ -85,6 +87,7 @@ export function createState(bytes: Uint8Array, position: number, options: Decode
     maxMapEntries: limits.maxMapEntries,
     maxDepth: limits.maxDepth,
     rejectDuplicateKeys: options?.duplicateKeys !== 'last-wins',
+    integerOrTextKeys: options?.mapKeys === 'integer-or-text',
     mapMode: options?.maps ?? 'auto',
   };
 }

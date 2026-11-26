@@ -220,7 +220,7 @@
   </header>
   <section class="topic">  <h3 id="principles-explicit-state">1. Explicit state over hidden state</h3>
   <p>A decoder needs a cursor, a nesting depth and some limits. Rather than keeping them in a class instance or module variables, pure-cbor puts them in one plain record. The record is created for a single decode call and passed down by argument, so every function that touches it says so in its signature.</p>
-<figure class="code" data-source="src/state.ts" data-lines="9-35,41-43"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** Explicit state for decoding one container tree. Created per decode call
+<figure class="code" data-source="src/state.ts" data-lines="9-35,41-45"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** Explicit state for decoding one container tree. Created per decode call
  * (only when the value is an array or map) and passed down; nothing is
  * shared between calls. */
 /** The current text window (see string.ts): part of the input, masked to
@@ -249,6 +249,8 @@ export interface DecodeState extends TextWindow {
   arenaUsed: number;
 // …
   readonly rejectDuplicateKeys: boolean;
+  /** mapKeys: 'integer-or-text': Map keys must be integers or text. */
+  readonly integerOrTextKeys: boolean;
   readonly mapMode: 'auto' | 'object' | 'map';
 }</code></pre></figure>
   <p>Encoding works the same way. The output is a <code>Writer</code> record holding bytes and a cursor. Functions that write take the writer and return nothing, or take a position and return the next one. Nothing else changes.</p>
@@ -436,7 +438,7 @@ export function createSlabEncoder(options: SlabOptions = {}): (value: Value) =&g
     return slab.subarray(cursor - end, cursor);
   };</code></pre></figure>
   <p>Decoding has the same choice for byte strings, as an option rather than a separate API:</p>
-<figure class="code" data-source="src/types.ts" data-lines="35-42"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/types.ts">src/types.ts</a></figcaption><pre><code class="language-ts">export interface DecodeOptions {
+<figure class="code" data-source="src/types.ts" data-lines="43-50"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/types.ts">src/types.ts</a></figcaption><pre><code class="language-ts">export interface DecodeOptions {
   /** How byte strings and typed arrays relate to the input:
    * 'copy' (default): copied, so independent of the input; byte strings over
    *   64 bytes from one decode may share one backing buffer (an arena).
@@ -534,7 +536,7 @@ function decodeAscii(bytes: Uint8Array, start: number, end: number): string | un
   <section class="topic">  <h3 id="principles-measured-performance">6. Performance is measured, one process per benchmark</h3>
   <p>Each workload in the benchmark runs in its own Node process. The README explains why: workloads sharing a process skew each other's V8 type feedback by up to 2×. Results are the median of 5 × 80 ms rounds, and BENCHMARK.md treats anything within about ±10% of 1.0 as level, because repeated runs of the same code moved that much.</p>
   <p>Measurements decide the shape of the code, and the code records them where they apply. Here a helper that would read more cleanly was kept out of the object loop, because V8 did not reliably inline it:</p>
-<figure class="code" data-source="src/map.ts" data-lines="249-261"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** Whether another entry follows; consumes the break of an indefinite map.
+<figure class="code" data-source="src/map.ts" data-lines="252-264"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** Whether another entry follows; consumes the break of an indefinite map.
  * Loops test `index &lt; entryCount` themselves first: per-entry calls here,
  * when V8 did not inline them, made small-object decoding bimodal (+40%). */
 function moreEntries(state: DecodeState, index: number, entryCount: number, headerOffset: number): boolean {
@@ -547,7 +549,7 @@ function moreEntries(state: DecodeState, index: number, entryCount: number, head
   if (index &gt;= state.maxMapEntries) fail('map-limit', headerOffset, 'Map exceeds maxMapEntries');
   return true;
 }</code></pre></figure>
-<figure class="code" data-source="src/map.ts" data-lines="376-380"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** state.position is immediately after the map's initial byte. Text keys build
+<figure class="code" data-source="src/map.ts" data-lines="388-392"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** state.position is immediately after the map's initial byte. Text keys build
  * a plain object; Map is used in 'map' mode, or in 'auto' mode from the first
  * non-text key. The object loop stays in this function: one call deeper, it
  * was not reliably inlined and small-object decoding became bimodal. */
@@ -1022,7 +1024,7 @@ export function writeBytes(bytes: Uint8Array, offset: number, value: Value, prof
     <div class="steps">
       <section class="step" data-nodes="decode" data-bytes="0-13" data-note="decode wraps the 14 bytes in a Binary descriptor, which holds just the bytes: no cursor and no DataView.">  <h3 id="decode-front-door">1. <code>decode()</code> and <code>binary()</code></h3>
   <p><code>decode</code> wraps the bytes in a <code>Binary</code> descriptor and reads exactly one item. The descriptor has no cursor and, deliberately, no DataView.</p>
-<figure class="code" data-source="src/index.ts" data-lines="45-47"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/index.ts">src/index.ts</a></figcaption><pre><code class="language-ts">export function decode(bytes: Uint8Array, options?: DecodeOptions): Value {
+<figure class="code" data-source="src/index.ts" data-lines="66-68"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/index.ts">src/index.ts</a></figcaption><pre><code class="language-ts">export function decode(bytes: Uint8Array, options?: DecodeOptions): Value {
   return readWhole(binary(bytes), options);
 }</code></pre></figure>
 <figure class="code" data-source="src/binary.ts" data-lines="3-7,18-24"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/binary.ts">src/binary.ts</a></figcaption><pre><code class="language-ts">/** Immutable descriptor over explicitly mutable memory. No cursor.
@@ -1041,7 +1043,7 @@ export function binary(bytes: Uint8Array): Binary {
   <p>The comment explains why: building a DataView means reading <code>.buffer</code>, which forces V8 to move a small fresh array's bytes off-heap. The README measures that at about 900 ns per message, more than the encode or decode itself.</p></section>
       <section class="step" data-nodes="readItem" data-bytes="0" data-note="a2 is major type 5, a map, so readItem creates one state for the tree below it.">  <h3 id="decode-read-item">2. <code>readItem()</code>: scalars need no state</h3>
   <p>The top-level reader switches on the major type in the first byte. Integers, simple values, floats, text and byte strings are read straight from <code>(bytes, offset)</code>. Only arrays, maps and tags create a <code>DecodeState</code>, once, for their whole tree. A whole-value read returns the value itself; <code>read</code> returns a <code>[value, nextOffset]</code> pair so callers can walk a sequence.</p>
-<figure class="code" data-source="src/codec.ts" data-lines="271-330"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** Top-level dispatch. Scalars, strings and typed arrays are read directly
+<figure class="code" data-source="src/codec.ts" data-lines="272-331"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** Top-level dispatch. Scalars, strings and typed arrays are read directly
  * (no state, and no tuple for whole-value reads); containers and other tags
  * create one DecodeState for their tree. */
 function readItem(buffer: Binary, offset: number, options: DecodeOptions | undefined, whole: true): Value;
@@ -1103,7 +1105,7 @@ export function readWhole(buffer: Binary, options?: DecodeOptions): Value {
 }</code></pre></figure></section>
       <section class="step" data-nodes="state" data-bytes="0" data-note="The map declares 2 entries, so 4 items are taken from the budget, and the remaining bytes must hold at least 4.">  <h3 id="decode-create-state">3. <code>createState()</code> and the limits</h3>
   <p>The state record is built once, with its limits already validated. Its item budget starts at the number of bytes left. Every container subtracts its declared item count on entry; since each item needs at least one byte, a valid message can never exceed its own length.</p>
-<figure class="code" data-source="src/state.ts" data-lines="68-103"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** position is immediately after the container's initial byte. */
+<figure class="code" data-source="src/state.ts" data-lines="70-106"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** position is immediately after the container's initial byte. */
 export function createState(bytes: Uint8Array, position: number, options: DecodeOptions | undefined): DecodeState {
   const headerOffset = position - 1;
   const limits = containerLimits(options, headerOffset);
@@ -1123,6 +1125,7 @@ export function createState(bytes: Uint8Array, position: number, options: Decode
     maxMapEntries: limits.maxMapEntries,
     maxDepth: limits.maxDepth,
     rejectDuplicateKeys: options?.duplicateKeys !== 'last-wins',
+    integerOrTextKeys: options?.mapKeys === 'integer-or-text',
     mapMode: options?.maps ?? 'auto',
   };
 }
@@ -1142,7 +1145,7 @@ export function leaveContainer(state: DecodeState): void {
   <p>The defaults are 1,000,000 elements per array, 1,000,000 entries per map and 128 levels of nesting. Tags count toward depth too, so deep input fails with <code>depth-limit</code> instead of overflowing the stack.</p></section>
       <section class="step" data-nodes="readValue" data-bytes="10-13" data-out="name-value" data-note="63 is not a small integer, so the map loop passes 'Ada' to readValue, which decodes definite text inline.">  <h3 id="decode-read-value">4. <code>readValue()</code>: the nested-item dispatcher</h3>
   <p>Every nested item goes through here. A token below 24 is a small unsigned integer and is its own value, so it returns before the switch. Definite text is decoded inline with no result tuple, and definite byte strings in the default <code>'copy'</code> mode go through <code>Arena.copyByteString</code>.</p>
-<figure class="code" data-source="src/codec.ts" data-lines="205-262"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** Read one nested item at the cursor and advance it. */
+<figure class="code" data-source="src/codec.ts" data-lines="206-263"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** Read one nested item at the cursor and advance it. */
 export function readValue(state: DecodeState): Value {
   const bytes = state.bytes;
   let position = state.position;
@@ -1246,7 +1249,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
 }</code></pre></figure></section>
       <section class="step" data-nodes="map" data-bytes="0 4" data-out="object id-value" data-note="Both keys are text, so the entries go into a plain object. The value 07 is below 24 and is decoded inline in the loop.">  <h3 id="decode-maps">6. The map loop</h3>
   <p>In the default <code>'auto'</code> mode, a map whose keys are all text becomes a plain object. The object loop lives inside <code>MapCodec.read</code> itself rather than a helper, and small unsigned integer values are decoded inline. A <code>__proto__</code> key becomes an own data property through <code>Object.defineProperty</code>: no prototype pollution, and no renaming.</p>
-<figure class="code" data-source="src/map.ts" data-lines="380-394,400-437"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue): Value {
+<figure class="code" data-source="src/map.ts" data-lines="392-406,412-449"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">export function read(state: DecodeState, additionalInfo: number, readValue: ReadValue): Value {
   const bytes = state.bytes;
   const headerOffset = state.position - 1;
   const indefinite = additionalInfo === Info.Indefinite;
@@ -1301,7 +1304,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
   return object;
 }</code></pre></figure>
   <p>If a non-text key appears, the entries read so far move into a <code>Map</code> and decoding carries on there, keeping their order. Duplicate keys are found by counting once per map rather than checking each key. A <code>Map</code> tells keys such as byte strings and arrays apart by identity, so those are compared as CBOR values: byte strings by their bytes, the rest by a fingerprint built from the decoded value, so decoding never needs the encoder.</p>
-<figure class="code" data-source="src/map.ts" data-lines="263-268,318-339,350-374"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** A duplicate key overwrites an earlier one, leaving fewer distinct keys
+<figure class="code" data-source="src/map.ts" data-lines="266-271,321-342,362-386"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/map.ts">src/map.ts</a></figcaption><pre><code class="language-ts">/** A duplicate key overwrites an earlier one, leaving fewer distinct keys
  * than entries. Counting once is ~4x cheaper than checking each key. */
 function checkDuplicates(state: DecodeState, distinctKeys: number, entries: number, headerOffset: number): void {
   if (state.rejectDuplicateKeys &amp;&amp; distinctKeys !== entries) fail('duplicate-key', headerOffset, 'Duplicate map key');
@@ -1339,7 +1342,7 @@ function readIntoMap(state: DecodeState, map: Map&lt;Value, Value&gt;, index: nu
   for (; moreEntries(state, index, entryCount, headerOffset); index++) {
     readable(bytes, state.position, 1);
     const keyToken = bytes[state.position];
-    let key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readValue(state);
+    let key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readOtherKey(state, keyToken, readValue);
     if (typeof key === 'object' &amp;&amp; key !== null) {
       if (state.rejectDuplicateKeys) (objectKeys ??= []).push(key);
       else key = earlierEqualKey(keysByFingerprint ??= new Map(), key);
@@ -1484,7 +1487,7 @@ export function copyByteString(state: DecodeState, start: number, length: number
   <p>BENCHMARK.md records the effect: since 0.6.0 a COSE or WebAuthn message costs about one allocation, which halved the default mode's time on those flows. The trade-off is documented too: one result can keep its siblings' bytes alive. <code>binaryOwnership: 'copy-separate'</code> gives every byte string its own buffer, and <code>'borrow'</code> returns views into the input.</p></section>
       <section class="step" data-nodes="tag" data-bytes="" data-note="There are no tags here.">  <h3 id="decode-tags">10. Tags</h3>
   <p>RFC 8746 typed-array tags read their byte-string content directly into the right typed array. Every other tag decodes its content (counting toward <code>maxDepth</code>), then converts it: a caller's decoder first, then the built-ins for dates, bignums and the self-described marker, otherwise an immutable <code>Tagged</code> value.</p>
-<figure class="code" data-source="src/codec.ts" data-lines="185-203"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** A tag: typed arrays read their byte-string content directly; every other
+<figure class="code" data-source="src/codec.ts" data-lines="185-204"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/codec.ts">src/codec.ts</a></figcaption><pre><code class="language-ts">/** A tag: typed arrays read their byte-string content directly; every other
  * tag decodes its content (counted toward maxDepth) and then converts it.
  * state.position is just after the tag's initial byte. */
 function readTag(state: DecodeState, additionalInfo: number): Value {
@@ -1492,7 +1495,8 @@ function readTag(state: DecodeState, additionalInfo: number): Value {
   const headerOffset = state.position - 1;
   const tag = readArgumentValue(bytes, state.position, additionalInfo);
   const contentOffset = argumentEnd(state.position, additionalInfo);
-  if (TypedArrayCodec.isTypedArrayTag(tag) &amp;&amp; !Tag.hasCustomDecoder(state.options, tag)) {
+  Tag.checkAllowed(state.options, tag, headerOffset);
+  if (TypedArrayCodec.isTypedArrayTag(tag) &amp;&amp; Tag.handlingOf(state.options, tag) === undefined) {
     const [value, end] = TypedArrayCodec.readTaggedContent(bytes, contentOffset, tag, state.options);
     state.position = end;
     return value;
@@ -1503,11 +1507,22 @@ function readTag(state: DecodeState, additionalInfo: number): Value {
   leaveContainer(state);
   return Tag.decodeTag(tag, content, state.options, headerOffset);
 }</code></pre></figure>
-<figure class="code" data-source="src/tag.ts" data-lines="61-75"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/tag.ts">src/tag.ts</a></figcaption><pre><code class="language-ts">/** Convert decoded tag content: a caller's decoder first, then the built-ins,
- * otherwise a Tagged value (or an error with unknownTags: 'reject'). */
+<figure class="code" data-source="src/tag.ts" data-lines="67-92"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/tag.ts">src/tag.ts</a></figcaption><pre><code class="language-ts">/** Checked at the tag's header, before its content is read: a 'reject'
+ * entry, or tag 55799 under unknownTags: 'reject'. */
+export function checkAllowed(options: DecodeOptions | undefined, tag: number, offset: number): void {
+  const handling = handlingOf(options, tag);
+  if (handling === 'reject' || (handling === undefined &amp;&amp; tag === SELF_DESCRIBED &amp;&amp; options?.unknownTags === 'reject')) {
+    fail('unsupported-tag', offset, `CBOR tag ${tag} is rejected`);
+  }
+}
+
+/** Convert decoded tag content: the caller's entry first ('tagged' keeps the
+ * tag), then the built-ins, otherwise a Tagged value (or an error with
+ * unknownTags: 'reject'). */
 export function decodeTag(tag: number, content: Value, options: DecodeOptions | undefined, offset: number): Value {
-  const custom = options?.tags;
-  if (custom !== undefined &amp;&amp; Object.hasOwn(custom, tag)) return custom[tag](content);
+  const handling = handlingOf(options, tag);
+  if (handling === 'tagged') return tagged(tag, content);
+  if (typeof handling === 'function') return handling(content);
   switch (tag) {
     case DATE_TIME: return dateFromText(content, offset);
     case EPOCH_TIME: return dateFromEpoch(content, offset);
@@ -1527,7 +1542,7 @@ export function decodeTag(tag: number, content: Value, options: DecodeOptions | 
     <li>Duplicate map keys are rejected by default, and invalid UTF-8 is rejected by default.</li>
   </ul>
   <p>It is also clear about what this is not: a full memory-budget guarantee. Apply message byte limits at the transport boundary too. The limits are validated once, by a function shared with the streaming scanner so both report the same errors:</p>
-<figure class="code" data-source="src/state.ts" data-lines="45-66"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">function validLimit(value: number | undefined, fallback: number, code: ErrorCode, name: string, offset: number): number {
+<figure class="code" data-source="src/state.ts" data-lines="47-68"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">function validLimit(value: number | undefined, fallback: number, code: ErrorCode, name: string, offset: number): number {
   if (value === undefined) return fallback;
   if (!Number.isSafeInteger(value) || value &lt; 0) fail(code, offset, `Invalid ${name}`);
   return value;
@@ -2360,7 +2375,7 @@ export function fail(code: ErrorCode, offset: number, message: string): never {
   throw new CborError(code, offset, message);
 }</code></pre></figure>
   <p><code>tryDecode</code> turns that into a discriminated result. It catches library validation errors only, not arbitrary programmer or runtime errors:</p>
-<figure class="code" data-source="src/index.ts" data-lines="49-56"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/index.ts">src/index.ts</a></figcaption><pre><code class="language-ts">export function tryDecode(bytes: Uint8Array, options?: DecodeOptions): Result&lt;Value&gt; {
+<figure class="code" data-source="src/index.ts" data-lines="70-77"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/index.ts">src/index.ts</a></figcaption><pre><code class="language-ts">export function tryDecode(bytes: Uint8Array, options?: DecodeOptions): Result&lt;Value&gt; {
   try {
     return { ok: true, value: decode(bytes, options) };
   } catch (error) {
@@ -2426,6 +2441,7 @@ npm test</code></pre></figure></section>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/corpus.test.mjs">corpus.test.mjs</a></th><td>The public and generated corpus, both ways with cbor-x and cborg</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/interoperability.test.mjs">interoperability.test.mjs</a></th><td>Bidirectional cbor-x interoperability (optional reference package)</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/foreign.test.mjs">foreign.test.mjs</a></th><td>Rejection vectors from other decoders: RFC 8949 Appendix F, ciborium, cbor2 and Jackson</td></tr>
+        <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/strict.test.mjs">strict.test.mjs</a></th><td>Strict decoding: <code>mapKeys</code>, <code>'tagged'</code> and <code>'reject'</code> tag entries, tag 55799, and <code>STRICT_DECODE</code></td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/security.test.mjs">security.test.mjs</a></th><td>Equal object keys under <code>last-wins</code>; strings split into thousands of chunks; chunked text and split characters</td></tr>
         <tr><th scope="row"><a class="module-name" href="https://github.com/davidgtonge/pure-cbor/blob/main/test/portable/suite.mjs">portable/suite.mjs</a></th><td>The portable conformance suite, with no Node APIs: Appendix A, every value kind, errors, ownership, sequences and Web Streams. Run in Node, Deno, Bun, workerd, and Chromium, Firefox and WebKit on the page and in web workers</td></tr>
       </tbody>
@@ -2456,7 +2472,7 @@ npm test</code></pre></figure></section>
     <figcaption>Imports point down the layers, or across within one (for example <code>sequence.ts</code> uses <code>allocation.ts</code>'s <code>encode</code>, and <code>map.ts</code> uses <code>keys.ts</code>). Nothing below <code>codec.ts</code> imports it: <code>array.ts</code> and <code>map.ts</code> receive <code>readValue</code> and <code>writeValue</code> as arguments.</figcaption>
   </figure>
   <p>That last point is visible in the signatures. The dispatcher types are declared next to the state they act on:</p>
-<figure class="code" data-source="src/state.ts" data-lines="105-106"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** The item dispatcher, passed to container codecs so they need not import it. */
+<figure class="code" data-source="src/state.ts" data-lines="108-109"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/state.ts">src/state.ts</a></figcaption><pre><code class="language-ts">/** The item dispatcher, passed to container codecs so they need not import it. */
 export type ReadValue = (state: DecodeState) =&gt; Value;</code></pre></figure>
 <figure class="code" data-source="src/writer.ts" data-lines="55-58"><figcaption><a href="https://github.com/davidgtonge/pure-cbor/blob/main/src/writer.ts">src/writer.ts</a></figcaption><pre><code class="language-ts">/** Dispatchers passed to container codecs so they need not import codec.ts.
  * depth is the nesting level of the value's container. */

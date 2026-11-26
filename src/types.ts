@@ -21,7 +21,11 @@ export type Scalar = number | bigint | string | boolean | null | undefined;
  * when all keys are text (by default), otherwise to `Map`. */
 export type Value =
   | Scalar | TypedArray | Date | Tagged | SimpleValue
-  | readonly Value[] | ReadonlyMap<Value, Value> | ValueObject;
+  | readonly Value[] | ReadonlyMap<Value, Value> | LabelMap | ValueObject;
+
+/** A map keyed by integers and text, as COSE headers, COSE keys and CWT
+ * claims are. A Value, so it encodes without a cast. */
+export type LabelMap = ReadonlyMap<number | string, Value>;
 
 /** A plain object (prototype Object.prototype or null) with string keys.
  * Properties whose value is undefined are omitted on encode, as in JSON. */
@@ -31,6 +35,10 @@ export type Decoded<T = Value> = readonly [value: T, nextOffset: number];
 
 /** Decodes the content of one CBOR tag. */
 export type TagDecoder = (content: Value) => Value;
+
+/** A `tags` entry: a decoder; 'tagged' to keep the tag as a Tagged value,
+ * skipping any built-in conversion; or 'reject' to make it an error. */
+export type TagHandling = TagDecoder | 'tagged' | 'reject';
 
 export interface DecodeOptions {
   /** How byte strings and typed arrays relate to the input:
@@ -53,10 +61,16 @@ export interface DecodeOptions {
   /** 'auto' (default): plain objects when every key is text, otherwise Map.
    * 'object': text keys only (others are an error). 'map': always Map. */
   readonly maps?: 'auto' | 'object' | 'map';
-  /** Decoders by tag number; they take precedence over the built-in ones
-   * (0, 1: Date; 2, 3: bigint; 55799: unwrapped; RFC 8746 typed arrays). */
-  readonly tags?: Readonly<Record<number, TagDecoder>>;
-  /** Tags with no decoder: 'tagged' (default) returns a Tagged value; 'reject' is an error. */
+  /** Which Map keys are allowed. 'any' (default); 'integer-or-text' makes any
+   * other key an error (unsupported-type): floats, byte strings, arrays, maps,
+   * tags and simple values. COSE labels are integers or text (RFC 9052 §3). */
+  readonly mapKeys?: 'any' | 'integer-or-text';
+  /** Handling by tag number, taking precedence over the built-ins (0, 1: Date;
+   * 2, 3: bigint; 55799: unwrapped; RFC 8746 typed arrays): a decoder,
+   * 'tagged' to keep the tag as a Tagged value, or 'reject'. */
+  readonly tags?: Readonly<Record<number, TagHandling>>;
+  /** Tags with no decoder: 'tagged' (default) returns a Tagged value; 'reject'
+   * is an error. 'reject' also rejects tag 55799, which carries no meaning. */
   readonly unknownTags?: 'tagged' | 'reject';
 }
 

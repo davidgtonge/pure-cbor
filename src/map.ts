@@ -232,6 +232,9 @@ function readTextKey(state: DecodeState, token: number): string {
   return key;
 }
 
+/** Major type 0 or 1 (an integer) or 3 (text, definite or in chunks). */
+const isIntegerOrText = (token: number): boolean => token >>> 5 <= Major.Negative || token >>> 5 === Major.Text;
+
 const isDefiniteText = (token: number): boolean => token >>> 5 === Major.Text && (token & 31) !== Info.Indefinite;
 
 /** Small unsigned integers are the most common map value: decode them here
@@ -337,6 +340,15 @@ function checkObjectKeys(state: DecodeState, objectKeys: readonly Value[], heade
   if (hasEqualBytes(byteStrings) || fingerprints.size !== otherKeys) fail('duplicate-key', headerOffset, 'Duplicate map key');
 }
 
+/** Any key but definite text, which is always allowed: checked here, off
+ * the text-key path, against mapKeys: 'integer-or-text'. */
+function readOtherKey(state: DecodeState, keyToken: number, readValue: ReadValue): Value {
+  if (state.integerOrTextKeys && !isIntegerOrText(keyToken)) {
+    fail('unsupported-type', state.position, 'Map keys must be integers or text (mapKeys: "integer-or-text")');
+  }
+  return readValue(state);
+}
+
 /** With duplicateKeys: 'last-wins', an object key equal to an earlier one
  * becomes that earlier key, so its value replaces the earlier value in
  * place, as a repeated primitive key's does. */
@@ -355,7 +367,7 @@ function readIntoMap(state: DecodeState, map: Map<Value, Value>, index: number, 
   for (; moreEntries(state, index, entryCount, headerOffset); index++) {
     readable(bytes, state.position, 1);
     const keyToken = bytes[state.position];
-    let key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readValue(state);
+    let key = isDefiniteText(keyToken) ? readTextKey(state, keyToken) : readOtherKey(state, keyToken, readValue);
     if (typeof key === 'object' && key !== null) {
       if (state.rejectDuplicateKeys) (objectKeys ??= []).push(key);
       else key = earlierEqualKey(keysByFingerprint ??= new Map(), key);

@@ -3,7 +3,7 @@ import { readWhole, write as writeAt, encodedSize as measureExact, maxEncodedSiz
 import { profileOf } from './writer.js';
 import { CborError } from './error.js';
 import type { Result } from './error.js';
-import type { Value, DecodeOptions, EncodeOptions } from './types.js';
+import type { Value, DecodeOptions, EncodeOptions, TagHandling } from './types.js';
 import type { Binary } from './binary.js';
 
 export { binary } from './binary.js';
@@ -20,8 +20,29 @@ export type { DecodeStreamOptions, EncodeStreamOptions, BatchDecodeStreamOptions
 export { CborError } from './error.js';
 export type { ErrorCode, Result } from './error.js';
 export type {
-  Value, ValueObject, Scalar, TypedArray, Tagged, SimpleValue, TagDecoder, DecodeOptions, EncodeOptions, Decoded,
+  Value, ValueObject, LabelMap, Scalar, TypedArray, Tagged, SimpleValue, TagDecoder, TagHandling, DecodeOptions,
+  EncodeOptions, Decoded,
 } from './types.js';
+
+/** RFC 8746 typed arrays (tags 64–87) and self-described CBOR (55799). */
+const strictTags: Readonly<Record<number, TagHandling>> = Object.freeze({
+  ...Object.fromEntries(Array.from({ length: 24 }, (_, index) => [64 + index, 'tagged' as const])),
+  55799: 'reject' as const,
+});
+
+/** Strict decoding, as security formats (COSE, CWT, WebAuthn, mdoc) need:
+ * every map is a Map with integer or text keys, duplicate keys and invalid
+ * UTF-8 are errors, tags with no built-in meaning are errors, typed-array
+ * tags stay tags (so one can't pass for a byte string), and self-described
+ * CBOR is rejected. Frozen; spread it to change a field. */
+export const STRICT_DECODE: DecodeOptions = Object.freeze({
+  maps: 'map',
+  mapKeys: 'integer-or-text',
+  duplicateKeys: 'reject',
+  invalidUtf8: 'reject',
+  unknownTags: 'reject',
+  tags: strictTags,
+});
 
 /** Write into a prepared buffer; returns the next offset. */
 export function write(buffer: Binary, offset: number, value: Value, options?: EncodeOptions): number {

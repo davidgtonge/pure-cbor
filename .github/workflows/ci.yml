@@ -95,12 +95,16 @@ jobs:
           npm init -y >/dev/null && npm pkg set type=module
           npm install --no-audit --no-fund ../pure-cbor-*.tgz typescript@5
           cat > main.ts <<'EOF'
-          import { encode, decode, tryDecode, CborError, type Value } from 'pure-cbor';
+          import { encode, decode, tryDecode, CborError, STRICT_DECODE, type Value, type LabelMap, type DecodeOptions } from 'pure-cbor';
           const value: Value = { id: 7, tags: ['a'], when: new Date(0) };
           const bytes: Uint8Array = encode(value, { deterministic: true });
           const result = tryDecode(bytes);
           if (!result.ok) throw result.error satisfies CborError;
           console.log(decode(bytes));
+          // A LabelMap encodes without a cast; tags accept decoders, 'tagged' and 'reject'.
+          const header: LabelMap = new Map<number | string, Value>([[1, -7], ['kid', 'key-1']]);
+          const options: DecodeOptions = { ...STRICT_DECODE, tags: { ...STRICT_DECODE.tags, 42: 'tagged', 43: (content: Value) => content, 44: 'reject' } };
+          console.log(decode(encode(header), options));
           EOF
           echo '{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext", "target": "ES2022", "strict": true, "outDir": "out" } }' > tsconfig.json
           npx tsc -p .

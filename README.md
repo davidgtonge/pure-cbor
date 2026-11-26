@@ -292,6 +292,7 @@ Byte strings are copied by default, so results never depend on the input buffer.
 | `encodedSize(value)` | Exact encoded size. Strings may need a UTF-8 sizing pass. |
 | `maxEncodedSize(value)` | Upper bound. Exact for numbers, typed arrays and numeric-only arrays. |
 | `tryDecode(bytes, options?)` | Discriminated `Result`; catches library validation errors, not arbitrary programmer/runtime errors. |
+| `STRICT_DECODE` | Frozen decode options for security formats such as COSE; see [Strict decoding](#strict-decoding). |
 | `createSequenceDecoder(options?)` | Incremental CBOR-sequence decoder: `push(chunk, onValue)`, `end()`. |
 | `createSequenceEncoder(options?)` | Sequence encoder: `push(value, onChunk)`, `flush(onChunk)`. |
 | `decodeStream(options?)` | `TransformStream` from bytes to values, or to arrays of values with `batch: true`. |
@@ -365,8 +366,10 @@ decode(wire, { maxMapEntries: 1_000 });        // default 1,000,000 per map
 decode(wire, { maxDepth: 32 });                // default 128 nested arrays/maps
 decode(wire, { duplicateKeys: 'last-wins' });  // default 'reject'
 decode(wire, { maps: 'map' });                 // 'auto' (default), 'object' or 'map'
+decode(wire, { mapKeys: 'integer-or-text' });  // Map keys must be integers or text; default 'any'
 decode(wire, { tags: { 42: cidFromBytes } });  // your tag decoders; they take precedence
-decode(wire, { unknownTags: 'reject' });       // default 'tagged'
+decode(wire, { tags: { 64: 'tagged', 55799: 'reject' } }); // keep a tag as Tagged, or make it an error
+decode(wire, { unknownTags: 'reject' });       // default 'tagged'; 'reject' also rejects tag 55799
 ```
 
 - Every container's declared length is checked against its limit and the remaining input before anything is allocated.
@@ -381,6 +384,28 @@ This isn't a full memory-budget guarantee; apply message byte limits at the tran
   - `'copy-separate'`: every byte string and typed array gets its own exactly sized buffer.
   - `'borrow'`: views into the input wherever possible; aligned, native-endian typed arrays become views and others are copied. A small borrowed result can keep a large input alive.
 - Strict UTF-8 validation is the default. A leading U+FEFF is preserved. Lone UTF-16 surrogates encode as U+FFFD.
+
+### Strict decoding
+
+Formats that carry signatures, such as COSE, CWT, WebAuthn and mdoc, need one reading of every message: anything a strict verifier elsewhere would reject should be an error here too. `STRICT_DECODE` is that profile, frozen:
+
+```ts
+import { decode, STRICT_DECODE, type LabelMap } from 'pure-cbor';
+
+const header = decode(protectedBytes, STRICT_DECODE) as LabelMap;
+decode(bytes, { ...STRICT_DECODE, maxDepth: 16 }); // spread it to change a field
+```
+
+| Option | Strict value | What it rejects |
+| --- | --- | --- |
+| `maps` | `'map'` | Nothing: every map is a `Map`, so code sees one shape, even for `{}` and text-only keys |
+| `mapKeys` | `'integer-or-text'` | Keys that aren't integers or text. A float key `1.0` would otherwise decode as `1`; COSE labels must be integers or text (RFC 9052 §3) |
+| `duplicateKeys` | `'reject'` | Repeated keys, compared as CBOR values (the default too) |
+| `invalidUtf8` | `'reject'` | Invalid UTF-8 (the default too) |
+| `unknownTags` | `'reject'` | Tags with no built-in meaning, and tag 55799 (self-described CBOR), which would be a second encoding of the same message |
+| `tags` | 64–87: `'tagged'`; 55799: `'reject'` | Nothing: RFC 8746 typed-array tags stay `Tagged`, so a tagged array can't pass for a byte string |
+
+Dates (tags 0 and 1) and bignums (tags 2 and 3) keep their built-in meaning. `LabelMap` (`ReadonlyMap<number | string, Value>`) types the integer- and text-keyed maps these formats use; it's a `Value`, so it encodes without a cast.
 
 Error codes: `truncated`, `capacity`, `invalid-offset`, `invalid-header`, `invalid-length`, `invalid-utf8`, `integer-overflow`, `array-limit`, `map-limit`, `depth-limit`, `item-limit`, `duplicate-key`, `unsupported-type`, `unsupported-tag`, `invalid-tag-content`, `trailing-data`, `invalid-buffer`.
 

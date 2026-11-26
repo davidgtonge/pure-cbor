@@ -190,7 +190,8 @@ function readTag(state: DecodeState, additionalInfo: number): Value {
   const headerOffset = state.position - 1;
   const tag = readArgumentValue(bytes, state.position, additionalInfo);
   const contentOffset = argumentEnd(state.position, additionalInfo);
-  if (TypedArrayCodec.isTypedArrayTag(tag) && !Tag.hasCustomDecoder(state.options, tag)) {
+  Tag.checkAllowed(state.options, tag, headerOffset);
+  if (TypedArrayCodec.isTypedArrayTag(tag) && Tag.handlingOf(state.options, tag) === undefined) {
     const [value, end] = TypedArrayCodec.readTaggedContent(bytes, contentOffset, tag, state.options);
     state.position = end;
     return value;

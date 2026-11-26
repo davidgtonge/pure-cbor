@@ -1,6 +1,6 @@
 import { fail } from './error.js';
 import * as Bignum from './bignum.js';
-import type { DecodeOptions, Tagged, Value } from './types.js';
+import type { DecodeOptions, TagHandling, Tagged, Value } from './types.js';
 
 // Tags: an immutable Tagged variant, built-in conversions on decode, and
 // Date <-> tag 1 on encode. RFC 8746 typed-array tags live in typed-array.ts.
@@ -58,11 +58,28 @@ function dateFromEpoch(content: Value, offset: number): Date {
 
 // ---------------------------------------------------------------- decoding
 
-/** Convert decoded tag content: a caller's decoder first, then the built-ins,
- * otherwise a Tagged value (or an error with unknownTags: 'reject'). */
-export function decodeTag(tag: number, content: Value, options: DecodeOptions | undefined, offset: number): Value {
+/** The caller's `tags` entry for this tag, if any. */
+export function handlingOf(options: DecodeOptions | undefined, tag: number): TagHandling | undefined {
   const custom = options?.tags;
-  if (custom !== undefined && Object.hasOwn(custom, tag)) return custom[tag](content);
+  return custom !== undefined && Object.hasOwn(custom, tag) ? custom[tag] : undefined;
+}
+
+/** Checked at the tag's header, before its content is read: a 'reject'
+ * entry, or tag 55799 under unknownTags: 'reject'. */
+export function checkAllowed(options: DecodeOptions | undefined, tag: number, offset: number): void {
+  const handling = handlingOf(options, tag);
+  if (handling === 'reject' || (handling === undefined && tag === SELF_DESCRIBED && options?.unknownTags === 'reject')) {
+    fail('unsupported-tag', offset, `CBOR tag ${tag} is rejected`);
+  }
+}
+
+/** Convert decoded tag content: the caller's entry first ('tagged' keeps the
+ * tag), then the built-ins, otherwise a Tagged value (or an error with
+ * unknownTags: 'reject'). */
+export function decodeTag(tag: number, content: Value, options: DecodeOptions | undefined, offset: number): Value {
+  const handling = handlingOf(options, tag);
+  if (handling === 'tagged') return tagged(tag, content);
+  if (typeof handling === 'function') return handling(content);
   switch (tag) {
     case DATE_TIME: return dateFromText(content, offset);
     case EPOCH_TIME: return dateFromEpoch(content, offset);
@@ -74,8 +91,4 @@ export function decodeTag(tag: number, content: Value, options: DecodeOptions | 
   return tagged(tag, content);
 }
 
-/** Whether the caller supplied a decoder for this tag. */
-export function hasCustomDecoder(options: DecodeOptions | undefined, tag: number): boolean {
-  const custom = options?.tags;
-  return custom !== undefined && Object.hasOwn(custom, tag);
-}
+
