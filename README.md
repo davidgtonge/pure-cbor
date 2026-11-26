@@ -405,9 +405,13 @@ decode(bytes, { ...STRICT_DECODE, maxDepth: 16 }); // spread it to change a fiel
 | `unknownTags` | `'reject'` | Tags with no built-in meaning, and tag 55799 (self-described CBOR), which would be a second encoding of the same message |
 | `tags` | 64–87: `'tagged'`; 55799: `'reject'` | Nothing: RFC 8746 typed-array tags stay `Tagged`, so a tagged array can't pass for a byte string |
 
+A format with tags of its own, such as COSE's message tags (16–18, 96–98) or CWT's 61, needs them allowed, since `unknownTags: 'reject'` refuses tags pure-cbor has no meaning for. Either add them as entries, `{ ...STRICT_DECODE, tags: { ...STRICT_DECODE.tags, 18: 'tagged' } }`, or check the outer tag yourself with `{ ...STRICT_DECODE, unknownTags: 'tagged' }`; the explicit entries (64–87 kept, 55799 rejected) still apply.
+
 Dates (tags 0 and 1) and bignums (tags 2 and 3) keep their built-in meaning. `LabelMap` (`ReadonlyMap<number | string, Value>`) types the integer- and text-keyed maps these formats use; it's a `Value`, so it encodes without a cast.
 
 Error codes: `truncated`, `capacity`, `invalid-offset`, `invalid-header`, `invalid-length`, `invalid-utf8`, `integer-overflow`, `array-limit`, `map-limit`, `depth-limit`, `item-limit`, `duplicate-key`, `unsupported-type`, `unsupported-tag`, `invalid-tag-content`, `trailing-data`, `invalid-buffer`.
+
+When decoding, `unsupported-type` only ever means a map key the options don't allow (`maps: 'object'` or `mapKeys: 'integer-or-text'`), so callers can map it to their own error. Its other uses are all on the encode side.
 
 ## Architecture
 
