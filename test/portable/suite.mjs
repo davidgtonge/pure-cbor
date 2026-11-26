@@ -5,7 +5,7 @@
 // test/*.test.mjs go further; this one is what every runtime must pass.
 
 import {
-  encode, decode, tryDecode, encodeInto, encodedSize, maxEncodedSize, createSlabEncoder,
+  binary, read, encode, decode, tryDecode, encodeInto, encodedSize, maxEncodedSize, createSlabEncoder,
   tagged, isTagged, simple, isSimpleValue, CborError,
   createSequenceDecoder, createSequenceEncoder, decodeStream, encodeStream, decodeSequence, encodeSequence,
 } from '../../dist/index.js';
@@ -173,6 +173,41 @@ testCase('text: ASCII, multi-byte and long strings agree with TextEncoder', () =
     checkEqual(toHex(bytes.subarray(bytes.length - utf8.length)), toHex(utf8), `UTF-8 of ${text.slice(0, 12)}`);
   }
   roundTrip('\ud800', '�', 'a lone surrogate is written as U+FFFD');
+});
+
+testCase('text windows: every length, ASCII and not, across window edges, at an offset', () => {
+  const random = seededRandom(0x7e57);
+  const word = (length) => {
+    let text = '';
+    for (let index = 0; index < length; index++) {
+      const roll = random();
+      text += roll < 0.02 ? 'é' : roll < 0.03 ? '🎉' : String.fromCharCode(32 + Math.floor(random() * 95));
+    }
+    return text;
+  };
+  for (let round = 0; round < 40; round++) {
+    // Rows of strings of every length, with numbers, floats and nested maps between them.
+    const rows = Array.from({ length: 60 }, (_, index) => ({
+      id: index,
+      short: word(index % 33),
+      medium: word(16 + ((index * 7 + round) % 300)),
+      score: index + 0.5,
+      nested: { tag: word((index * 13) % 40), flag: index % 2 === 0, bytes: bytesOf(index, 255, 128) },
+      list: [word(round % 20), word(33 + (index % 40)), index],
+    }));
+    const bytes = encode(rows);
+    checkSame(decode(bytes), rows, `round ${round}`);
+    // The same message read at an offset, with bytes before and after it.
+    const padded = new Uint8Array(bytes.length + 7);
+    padded.set(bytes, 3);
+    padded.fill(0xff, 0, 3);
+    const [value, end] = read(binary(padded), 3);
+    checkSame(value, rows, `round ${round} at an offset`);
+    checkEqual(end, bytes.length + 3, `round ${round} end`);
+  }
+  // A long ASCII string spanning more than one window, and one ending exactly at the input's end.
+  const long = 'x'.repeat(5000) + 'y';
+  checkSame(decode(encode([long, 'tail string of 40 bytes, plain ascii..'])), [long, 'tail string of 40 bytes, plain ascii..'], 'long and tail');
 });
 
 testCase('invalid UTF-8 is rejected by default and replaced on request, as TextDecoder does', () => {

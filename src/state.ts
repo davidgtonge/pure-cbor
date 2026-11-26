@@ -9,7 +9,15 @@ const DEFAULT_MAX_DEPTH = 128;
 /** Explicit state for decoding one container tree. Created per decode call
  * (only when the value is an array or map) and passed down; nothing is
  * shared between calls. */
-export interface DecodeState {
+/** The current text window (see string.ts): part of the input, masked to
+ * ASCII and decoded with one TextDecoder call, that medium-length ASCII
+ * strings are sliced from. Empty until the first such string. */
+export interface TextWindow {
+  windowStart: number;
+  windowText: string;
+}
+
+export interface DecodeState extends TextWindow {
   readonly bytes: Uint8Array;
   /** Cursor: the next unread byte. */
   position: number;
@@ -70,6 +78,8 @@ export function createState(bytes: Uint8Array, position: number, options: Decode
     floatView: undefined,
     arena: undefined,
     arenaUsed: 0,
+    windowStart: 0,
+    windowText: '',
     useArena: options?.binaryOwnership === undefined || options.binaryOwnership === 'copy',
     maxArrayLength: limits.maxArrayLength,
     maxMapEntries: limits.maxMapEntries,

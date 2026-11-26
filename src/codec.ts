@@ -229,7 +229,7 @@ export function readValue(state: DecodeState): Value {
         // Definite text inline: no result tuple on the most common path.
         const byteLength = readArgumentValue(bytes, position, additionalInfo);
         const start = argumentEnd(position, additionalInfo);
-        const value = StringCodec.readPayload(bytes, start, byteLength, state.options);
+        const value = StringCodec.readPayload(bytes, start, byteLength, state.options, state);
         state.position = start + byteLength;
         return value;
       }

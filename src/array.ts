@@ -95,7 +95,7 @@ export function read(state: DecodeState, additionalInfo: number, readValue: Read
     if (majorType === Major.Text && elementInfo !== Info.Indefinite) {
       const byteLength = readArgumentValue(bytes, position, elementInfo);
       position = argumentEnd(position, elementInfo);
-      values[index] = StringCodec.readPayload(bytes, position, byteLength, state.options);
+      values[index] = StringCodec.readPayload(bytes, position, byteLength, state.options, state);
       position += byteLength;
     } else if (majorType === Major.Unsigned && elementInfo < Info.EightBytes) {
       values[index] = readArgumentValue(bytes, position, elementInfo);

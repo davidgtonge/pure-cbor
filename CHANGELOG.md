@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Faster decoding of text-heavy data: ASCII strings of 16–255 bytes inside a container are sliced from a window of the input decoded with one `TextDecoder` call (the window is masked to 7 bits, so it decodes as one byte per character). 100 Bluesky-style records decode 1.24× faster and msgpack's sample-large 1.17×, ahead of cbor-x with its native addon; other workloads are unchanged within noise. As with the byte-string arena, a decoded string that is a slice keeps its window (at most 4 KiB) alive.
 - Faster encoding of outputs over 64 KiB: the staging buffer is now kept up to 256 KiB between calls. At 64 KiB, every larger output regrew it and copied its first 64 KB again. Measured under the same conditions, a 130 KB float mesh encodes about 4% faster and a 90 KB float array about 19% faster. A process keeps at most 256 KiB for this after a large encode.
 - Docs: cbor-x's optional native addon (installed automatically on Node) decodes text-heavy data up to 1.26× faster than pure-cbor. The README and BENCHMARK.md now say so, with measurements, and the second promise reads "the fastest pure-JavaScript CBOR library". BENCHMARK.md also records three pure-JavaScript attempts at the addon's batching trick, all slower on real data.
 

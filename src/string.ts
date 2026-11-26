@@ -1,6 +1,7 @@
 import { readable, writable } from './binary.js';
 import { argumentSize, writeArgument, MajorBits } from './header.js';
 import { fail } from './error.js';
+import type { TextWindow } from './state.js';
 import type { DecodeOptions } from './types.js';
 
 const encoder = new TextEncoder();
@@ -183,18 +184,84 @@ function decodeShortUtf8(bytes: Uint8Array, start: number, end: number): string 
 }
 
 /** Kept small so V8 can inline it into hot array and map loops; the native
- * decoder and its error handling live in decodeNative. */
-export function readPayload(bytes: Uint8Array, start: number, byteLength: number, options: DecodeOptions | undefined): string {
+ * decoder and its error handling live in decodeNative. A container decode
+ * passes its state as `window`; a single top-level string has none. */
+export function readPayload(bytes: Uint8Array, start: number, byteLength: number, options: DecodeOptions | undefined, window?: TextWindow): string {
   readable(bytes, start, byteLength);
   const end = start + byteLength;
   if (byteLength <= SHORT_DECODE) {
+    // Inside a window already decoded, even a short string is cheaper as a slice.
+    if (window !== undefined && byteLength >= MIN_SLICED && inWindow(window, start, end) && isAscii(bytes, start, end)) {
+      return window.windowText.slice(start - window.windowStart, end - window.windowStart);
+    }
     const decoded = decodeAscii(bytes, start, end) ?? decodeShortUtf8(bytes, start, end);
     if (decoded !== undefined) return decoded;
   }
-  return decodeNative(bytes, start, end, options);
+  return decodeNative(bytes, start, end, options, window);
 }
 
-function decodeNative(bytes: Uint8Array, start: number, end: number, options: DecodeOptions | undefined): string {
+// Medium-length ASCII text: one TextDecoder call for many strings.
+//
+// Each TextDecoder call costs about 130 ns, whatever the length, and building
+// longer strings in JS costs more. So rather than one call per string, the
+// decoder takes a window of the input from the string onward, masks every
+// byte to 7 bits, and decodes the window in one call. Masking makes the whole
+// window ASCII, so it decodes one byte to one character at TextDecoder's
+// fastest; only bytes outside strings (headers, numbers) are changed, and
+// they are never read as text. Each ASCII string inside the window is then a
+// slice of it, which V8 makes without copying. This is cbor-x's native
+// string-extraction idea in pure JS. (A latin1 TextDecoder would need no
+// mask, but it is Windows-1252: bytes 0x80-0x9F become two-byte characters.)
+//
+// The trade-off, as with the byte-string arena: a decoded string that is a
+// slice keeps its window (at most WINDOW_BYTES) alive while it is referenced.
+
+/** Bytes per window. Smaller windows decode fewer strings per call; 1 KiB
+ * measured no gain over a call per string, 4 KiB about 10%. */
+const WINDOW_BYTES = 4096;
+/** Longer strings are decoded on their own: one call, and no window kept alive. */
+const WINDOW_MAX_STRING = 256;
+/** Shorter strings are built in JS even inside a window. From 13 characters V8
+ * slices a string without copying; from 16, slicing measured faster than the
+ * JS fast path (Bluesky-style records decode 1.24x faster with it, against
+ * 1.07x from windows for strings over 32 bytes alone). */
+const MIN_SLICED = 16;
+/** Reused for every window. Like the encode staging buffer it holds no data
+ * between calls: each window is decoded from it before it is written again. */
+const windowScratch = new Uint8Array(WINDOW_BYTES);
+const windowWords = new Uint32Array(windowScratch.buffer);
+
+function isAscii(bytes: Uint8Array, start: number, end: number): boolean {
+  let highBits = 0;
+  let position = start;
+  for (; position + 8 <= end; position += 8) {
+    highBits |= bytes[position] | bytes[position + 1] | bytes[position + 2] | bytes[position + 3] |
+      bytes[position + 4] | bytes[position + 5] | bytes[position + 6] | bytes[position + 7];
+  }
+  for (; position < end; position++) highBits |= bytes[position];
+  return (highBits & 0x80) === 0;
+}
+
+const inWindow = (window: TextWindow, start: number, end: number): boolean =>
+  start >= window.windowStart && end <= window.windowStart + window.windowText.length;
+
+/** The ASCII string at [start, end) as a slice of the current window, or of
+ * a new window starting at `start`. */
+function sliceWindow(window: TextWindow, bytes: Uint8Array, start: number, end: number): string {
+  if (!inWindow(window, start, end)) {
+    const length = Math.min(bytes.length - start, WINDOW_BYTES);
+    windowScratch.set(bytes.subarray(start, start + length));
+    for (let index = 0; index < (length + 3) >>> 2; index++) windowWords[index] &= 0x7f7f7f7f;
+    window.windowText = strictDecoder.decode(windowScratch.subarray(0, length));
+    window.windowStart = start;
+  }
+  return window.windowText.slice(start - window.windowStart, end - window.windowStart);
+}
+
+function decodeNative(bytes: Uint8Array, start: number, end: number, options: DecodeOptions | undefined, window: TextWindow | undefined): string {
+  if (window !== undefined && end - start < WINDOW_MAX_STRING && isAscii(bytes, start, end)) {
+    return sliceWindow(window, bytes, start, end);
+  }
   try {
     const decoder = options?.invalidUtf8 === 'replace' ? lenientDecoder : strictDecoder;
     return decoder.decode(bytes.subarray(start, end));

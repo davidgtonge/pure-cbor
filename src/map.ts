@@ -227,7 +227,7 @@ function readTextKey(state: DecodeState, token: number): string {
   if (byteLength === 1 && bytes[start] < 0x80) return String.fromCharCode(bytes[start]);
   const cached = KeyCache.lookup(bytes, start, byteLength);
   if (cached !== undefined) return cached;
-  const key = StringCodec.readPayload(bytes, start, byteLength, state.options);
+  const key = StringCodec.readPayload(bytes, start, byteLength, state.options, state);
   if (state.options?.invalidUtf8 !== 'replace') KeyCache.remember(bytes, start, byteLength, key);
   return key;
 }
